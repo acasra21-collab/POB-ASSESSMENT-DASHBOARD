@@ -24,6 +24,7 @@ import json
 import os
 import re
 import sys
+import threading
 import traceback
 import urllib.request
 from datetime import datetime, date, timedelta
@@ -201,8 +202,32 @@ PSEUDO_FIELDS = {
 
 DATE_BASES = ("COLLECTIONDATE", "ASSESSMENTDATE", "REGISTRYDATE")
 
-# Global in-memory dataset (single-user local tool).
-STATE = {"ds": None}
+# Global in-memory dataset (single-user local tool). "job" tracks the background
+# parse kicked off by /upload — parsing a 200k+ row masterlist can take a couple
+# minutes, far longer than a host's reverse-proxy will hold a request open, so
+# /upload returns almost instantly and the upload page polls /upload_status
+# instead of blocking on the parse.
+STATE = {"ds": None,
+         "job": {"status": "idle", "progress": 0, "total": 0, "stage": "", "error": None}}
+JOB_LOCK = threading.Lock()
+
+
+def _set_job(**kw):
+    with JOB_LOCK:
+        STATE["job"].update(kw)
+
+
+def _get_job():
+    with JOB_LOCK:
+        return dict(STATE["job"])
+
+
+class _NamedBytes(io.BytesIO):
+    """io.BytesIO with a .filename so it satisfies the FileStorage-shaped
+    interface load_targets() expects, without holding a Flask request open."""
+    def __init__(self, data, filename):
+        super().__init__(data)
+        self.filename = filename
 
 
 # ── Coercion helpers ─────────────────────────────────────────────────────────
@@ -247,31 +272,39 @@ def parse_iso(val):
         return None
 
 
-def parse_xlsx(file_storage):
+_intern = sys.intern
+
+
+def build_records(file_storage, date_basis, on_progress=None):
+    """Parse the uploaded xlsx directly into compact, interned tuples sorted by
+    date ordinal — single pass over the sheet (the old version built a full
+    220k-row list of dicts first, then made a second pass over that list;
+    merging the two saves one full materialization of the row data, though
+    `dict.get` per row turned out to be the cheap part — openpyxl's own XML
+    parsing per row dominates the wall-clock time either way). If given,
+    on_progress(i, total) is called periodically with the current/total row
+    count so a caller (e.g. a background upload thread) can report status."""
     import openpyxl
     wb = openpyxl.load_workbook(file_storage, read_only=True, data_only=True)
     ws = wb["Sheet1"] if "Sheet1" in wb.sheetnames else wb.active
-    rows, headers = [], None
+    try:
+        total = ws.max_row - 1 if ws.max_row else 0
+    except Exception:
+        total = 0
+
+    recs = []
+    undated = 0
+    headers = None
     for i, row in enumerate(ws.iter_rows(values_only=True)):
         if i == 0:
             headers = [str(h).strip() if h is not None else f"col_{j}" for j, h in enumerate(row)]
             continue
+        if on_progress and i % 5000 == 0:
+            on_progress(i, total)
         if row is None or all(v is None for v in row):
             continue
-        rows.append(dict(zip(headers, row)))
-    wb.close()
-    return rows
+        g = dict(zip(headers, row)).get
 
-
-_intern = sys.intern
-
-
-def build_records(rows, date_basis):
-    """Parse raw rows into compact, interned tuples sorted by date ordinal."""
-    recs = []
-    undated = 0
-    for raw in rows:
-        g = raw.get
         iso = parse_iso(g(date_basis))
         if not iso:
             undated += 1
@@ -332,7 +365,10 @@ def build_records(rows, date_basis):
                      port, importer, i2, gen, prod, orig, hs4, hs6, hs11,
                      is_oil, is_veh, is_ckd, vtype, pt, units, safe_float(g("QUANTITY")),
                      comps, iso, vclass, hs8, spec))
+    wb.close()
     recs.sort(key=lambda r: r[ORD])
+    if on_progress:
+        on_progress(total, total)
     return recs, undated
 
 
@@ -1293,24 +1329,38 @@ def api_memo_docx():
 
 # ── Routes: upload + shell ───────────────────────────────────────────────────
 
+def _render_dashboard():
+    ds = STATE["ds"]
+    meta = {"file1": ds["file1"], "prior_name": ds["prior_name"],
+            "date_basis": ds["date_basis"], "dmin": ds["dmin"].isoformat(), "dmax": ds["dmax"].isoformat(),
+            "ports": ds["ports"], "buckets": ds["buckets"], "undated": ds["undated"],
+            "has_prior": bool(ds["prior"]), "line_items": len(ds["records"]),
+            "generated": datetime.now().strftime("%B %d, %Y at %H:%M")}
+    chartjs, datalabels = fetch_scripts()
+    html = render_template("dashboard.html", meta=json.dumps(meta),
+                           chartjs_inline=chartjs, datalabels_inline=datalabels,
+                           logo_url=load_logo())
+    resp = make_response(html)
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    return resp
+
+
 @app.route("/")
 def index():
+    if STATE["ds"] is not None:
+        return _render_dashboard()
     return render_template("index.html")
 
 
-@app.route("/upload", methods=["POST"])
-def upload():
-    if "file1" not in request.files or request.files["file1"].filename == "":
-        return "No masterlist file selected.", 400
+def _run_upload_job(f1_bytes, f1_name, f2_bytes, f2_name, targets_bytes, date_basis):
     try:
-        date_basis = request.form.get("date_basis", "COLLECTIONDATE")
-        if date_basis not in DATE_BASES:
-            date_basis = "COLLECTIONDATE"
+        def progress(i, total):
+            _set_job(progress=i, total=total)
 
-        f1 = request.files["file1"]
-        recs, undated = build_records(parse_xlsx(f1), date_basis)
+        recs, undated = build_records(io.BytesIO(f1_bytes), date_basis, on_progress=progress)
         if not recs:
-            return "No dated rows found in the masterlist.", 400
+            _set_job(status="error", error="No dated rows found in the masterlist.")
+            return
         ords = [r[ORD] for r in recs]
         dmin = date.fromordinal(ords[0])
         dmax = date.fromordinal(ords[-1])
@@ -1318,35 +1368,51 @@ def upload():
         buckets = sorted({r[I2] for r in recs})
 
         prior = None
-        prior_name = None
-        f2 = request.files.get("file2")
-        if f2 and f2.filename:
-            precs, _ = build_records(parse_xlsx(f2), date_basis)
+        if f2_bytes:
+            _set_job(stage="Parsing prior-year file…")
+            precs, _ = build_records(io.BytesIO(f2_bytes), date_basis)
             prior = {"records": precs, "ords": [r[ORD] for r in precs]}
-            prior_name = f2.filename
 
-        targets = load_targets(request.files.get("targets"))
+        targets_fs = _NamedBytes(targets_bytes, "targets.csv") if targets_bytes else None
+        targets = load_targets(targets_fs)
 
         STATE["ds"] = {"records": recs, "ords": ords, "dmin": dmin, "dmax": dmax,
                        "ports": ports, "buckets": buckets, "targets": targets,
-                       "date_basis": date_basis, "file1": f1.filename,
-                       "undated": undated, "prior": prior, "prior_name": prior_name}
-
-        meta = {"file1": f1.filename, "prior_name": prior_name,
-                "date_basis": date_basis, "dmin": dmin.isoformat(), "dmax": dmax.isoformat(),
-                "ports": ports, "buckets": buckets, "undated": undated,
-                "has_prior": bool(prior), "line_items": len(recs),
-                "generated": datetime.now().strftime("%B %d, %Y at %H:%M")}
-
-        chartjs, datalabels = fetch_scripts()
-        html = render_template("dashboard.html", meta=json.dumps(meta),
-                               chartjs_inline=chartjs, datalabels_inline=datalabels,
-                               logo_url=load_logo())
-        resp = make_response(html)
-        resp.headers["Content-Type"] = "text/html; charset=utf-8"
-        return resp
+                       "date_basis": date_basis, "file1": f1_name,
+                       "undated": undated, "prior": prior, "prior_name": f2_name}
+        _set_job(status="done", progress=len(recs), total=len(recs), stage="")
     except Exception:
-        return f"<pre style='padding:2rem;color:#b91c1c'>{traceback.format_exc()}</pre>", 500
+        _set_job(status="error", error=traceback.format_exc())
+
+
+@app.route("/upload", methods=["POST"])
+def upload():
+    if "file1" not in request.files or request.files["file1"].filename == "":
+        return "No masterlist file selected.", 400
+    date_basis = request.form.get("date_basis", "COLLECTIONDATE")
+    if date_basis not in DATE_BASES:
+        date_basis = "COLLECTIONDATE"
+
+    f1 = request.files["file1"]
+    f1_bytes, f1_name = f1.read(), f1.filename
+
+    f2 = request.files.get("file2")
+    f2_bytes = f2.read() if (f2 and f2.filename) else None
+    f2_name = f2.filename if f2_bytes else None
+
+    targets_file = request.files.get("targets")
+    targets_bytes = targets_file.read() if (targets_file and targets_file.filename) else None
+
+    _set_job(status="parsing", progress=0, total=0, stage="Parsing masterlist…", error=None)
+    threading.Thread(target=_run_upload_job,
+                      args=(f1_bytes, f1_name, f2_bytes, f2_name, targets_bytes, date_basis),
+                      daemon=True).start()
+    return render_template("uploading.html")
+
+
+@app.route("/upload_status")
+def upload_status():
+    return jsonify(**_get_job())
 
 
 if __name__ == "__main__":
