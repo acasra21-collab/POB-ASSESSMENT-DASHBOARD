@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Collection &amp; Import Analytics — Port of Batangas</title>
+{% if chartjs_inline %}<script>{{ chartjs_inline | safe }}</script>
+{% else %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>{% endif %}
+{% if datalabels_inline %}<script>{{ datalabels_inline | safe }}</script>
+{% else %}<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>{% endif %}
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{overflow-x:hidden;max-width:100vw}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#eef2f7;color:#1e293b;font-size:14px;line-height:1.5}
+a{color:inherit;text-decoration:none}
+.app-header{background:linear-gradient(135deg,#0f2d54 0%,#1a4a8a 100%);color:#fff;padding:0 1.5rem;position:sticky;top:0;z-index:200;box-shadow:0 2px 12px rgba(0,0,0,.3)}
+.header-inner{max-width:1600px;margin:0 auto;height:56px;display:flex;align-items:center;gap:1rem}
+.header-seal{width:42px;height:42px;flex-shrink:0;object-fit:contain;border-radius:50%}
+.header-brand h1{font-size:1rem;font-weight:700}
+.header-brand p{font-size:.7rem;color:rgba(255,255,255,.65)}
+.header-meta{margin-left:auto;text-align:right;font-size:.7rem;color:rgba(255,255,255,.6);line-height:1.5}
+.save-btn{background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.28);color:#fff;border-radius:7px;padding:.35rem .8rem;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap}
+.save-btn:hover{background:rgba(255,255,255,.24)}
+/* filter bar */
+.filterbar{background:#fff;border-bottom:2px solid #e2e8f0;position:sticky;top:56px;z-index:190;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.fb-inner{max-width:1600px;margin:0 auto;display:flex;align-items:center;gap:1rem;padding:.6rem 1.5rem;flex-wrap:wrap}
+.fb-group{display:flex;align-items:center;gap:.4rem}
+.fb-group label{font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em}
+input[type=date]{padding:.35rem .5rem;border:1px solid #cbd5e1;border-radius:7px;font-size:.8rem}
+.preset{background:#f1f5f9;border:none;border-radius:6px;padding:.3rem .6rem;font-size:.72rem;font-weight:600;color:#475569;cursor:pointer}
+.preset:hover{background:#e2e8f0}
+.chip{background:#f1f5f9;border:1px solid transparent;border-radius:6px;padding:.3rem .6rem;font-size:.74rem;font-weight:600;color:#64748b;cursor:pointer}
+.chip.active{background:#1d4ed8;color:#fff}
+.fb-apply{margin-left:auto;background:#1d4ed8;color:#fff;border:none;border-radius:8px;padding:.45rem 1.1rem;font-size:.8rem;font-weight:700;cursor:pointer}
+.fb-apply:hover{background:#1e40af}
+.tab-nav{background:#fff;border-bottom:2px solid #e2e8f0;position:sticky;top:108px;z-index:180}
+.tab-nav-inner{max-width:1600px;margin:0 auto;display:flex;overflow-x:auto;scrollbar-width:none}
+.tab-nav-inner::-webkit-scrollbar{display:none}
+.tab-btn{background:none;border:none;padding:.75rem 1.3rem;font-size:.82rem;font-weight:600;color:#64748b;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;white-space:nowrap}
+.tab-btn:hover{color:#0f2d54;background:#f8fafc}
+.tab-btn.active{color:#1d4ed8;border-bottom-color:#1d4ed8}
+.main{max-width:1600px;margin:0 auto;padding:1.5rem;min-height:60vh}
+.tab-pane{display:none}.tab-pane.active{display:block}
+.section{margin-bottom:1.5rem}
+.sec-label{font-size:.72rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.75rem}
+.card{background:#fff;border-radius:12px;padding:1.25rem 1.5rem;box-shadow:0 2px 8px rgba(0,0,0,.07)}
+.card-title{font-size:.8rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:1rem}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1rem}
+.kpi-card{background:#fff;border-radius:12px;padding:1rem 1.2rem;box-shadow:0 2px 8px rgba(0,0,0,.07);border-top:4px solid #3b82f6}
+.kpi-card.oil{border-top-color:#0d9488}.kpi-card.good{border-top-color:#059669}.kpi-card.bad{border-top-color:#dc2626}
+.kpi-label{font-size:.7rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.3rem}
+.kpi-value{font-size:1.45rem;font-weight:700;color:#0f172a}
+.kpi-sub{font-size:.7rem;color:#94a3b8;margin-top:.2rem}
+.kpi-sub.pos{color:#059669;font-weight:700}.kpi-sub.neg{color:#dc2626;font-weight:700}
+.chart-row{display:grid;gap:1rem}
+.chart-row.cols-2{grid-template-columns:1fr 1fr}.chart-row.cols-2-1{grid-template-columns:2fr 1fr}
+@media(max-width:900px){.chart-row.cols-2,.chart-row.cols-2-1{grid-template-columns:1fr}}
+.ch-wrap{position:relative;height:280px}.ch-wrap.tall{height:340px}.pie-wrap{position:relative;height:250px}
+.toolbar{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;margin-bottom:1rem}
+.search-input{padding:.45rem .8rem;border:1px solid #e2e8f0;border-radius:8px;font-size:.82rem;width:240px;outline:none}
+.table-wrap{overflow-x:auto;border-radius:8px;border:1px solid #e2e8f0}
+.dt{width:100%;border-collapse:collapse;min-width:560px}
+.dt th{background:#f8fafc;padding:.55rem .8rem;text-align:left;font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;border-bottom:2px solid #e2e8f0}
+.dt th.num,.dt td.num{text-align:right}
+.dt td{padding:.5rem .8rem;border-bottom:1px solid #f1f5f9;font-size:.82rem}
+.dt tr:last-child td{border-bottom:none}
+.dt tbody tr:hover td{background:#f8fafc}
+.dt td.name{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rank{color:#94a3b8;font-weight:600;font-size:.75rem}
+.pos{color:#059669;font-weight:600}.neg{color:#dc2626;font-weight:600}.neu{color:#94a3b8}
+.tag-new{background:#dbeafe;color:#1e40af;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px}
+.drill-row{cursor:pointer}.drill-row:hover td{background:rgba(99,102,241,.06)}
+.dtoggle{display:inline-block;width:1rem;color:#6366f1;transition:transform .15s}.dtoggle.open{transform:rotate(90deg)}
+.sub-row>td{padding:0!important;background:#f8fafc}
+.sub-panel{border-left:3px solid #6366f1;padding:.6rem 1rem;margin:.1rem .25rem .3rem}
+.sub-panel2{border-left:3px solid #94a3b8;padding:.4rem .8rem;margin:.1rem .15rem .25rem;background:#fff}
+.dpanel{border-left:3px solid #93c5fd;padding:.35rem .7rem;margin:.1rem .1rem .2rem;background:#fff}
+.subdt{width:100%;border-collapse:collapse;font-size:.78rem}
+.subdt th{text-align:left;color:#64748b;font-weight:600;padding:.2rem .4rem;border-bottom:1px solid #e2e8f0;font-size:.66rem;text-transform:uppercase}
+.subdt th.num,.subdt td.num{text-align:right}
+.subdt td{padding:.2rem .4rem;border-bottom:1px solid #eef2f7}
+.elink{color:#1d4ed8;font-weight:600;cursor:pointer;font-size:.74rem;white-space:nowrap}
+.elink:hover{text-decoration:underline}
+.muted{color:#94a3b8;font-size:.78rem}
+.loading{padding:2rem;text-align:center;color:#94a3b8;font-size:.85rem}
+.btn{display:inline-flex;align-items:center;gap:.4rem;background:#1d4ed8;color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-size:.8rem;font-weight:600;cursor:pointer}
+.btn.ghost{background:#f1f5f9;color:#0f2d54}
+.note{font-size:.76rem;color:#94a3b8;margin-bottom:1rem}
+.memo-box{background:#fff;border-radius:12px;padding:2rem 2.5rem;box-shadow:0 2px 8px rgba(0,0,0,.07);max-width:1000px;line-height:1.6}
+.memo-head{display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid #0f2d54;padding-bottom:.4rem;margin-bottom:1rem}
+.memo-title{font-size:1.2rem;font-weight:800;letter-spacing:.05em;color:#0f2d54}
+.memo-ref{font-size:.8rem;color:#64748b}
+.memo-fields{border-collapse:collapse;margin-bottom:1rem}
+.memo-fields td{padding:.15rem .5rem;vertical-align:top;font-size:.85rem}
+.memo-fields .mf-l{font-weight:700;color:#0f2d54;white-space:nowrap;width:84px}
+.mf-t{color:#64748b;font-size:.8rem}
+.memo-doc h2{font-size:1rem;color:#0f2d54;margin:1.3rem 0 .4rem}
+.memo-doc h3{font-size:.9rem;color:#1a4a8a;margin:.9rem 0 .3rem}
+.memo-doc h4{font-size:.85rem;color:#334155;margin:.7rem 0 .3rem;font-style:italic}
+.memo-doc p{text-align:justify;margin:.4rem 0;font-size:.86rem;color:#334155}
+.memo-tbl-wrap{overflow-x:auto;margin:.6rem 0 1rem}
+.memo-tbl{border-collapse:collapse;width:100%;font-size:.8rem}
+.memo-tbl.small{font-size:.7rem}
+.memo-tbl th{background:#16365C;color:#fff;font-weight:700;padding:.35rem .5rem;text-align:right;white-space:nowrap}
+.memo-tbl th:first-child,.memo-tbl th:nth-child(2){text-align:left}
+.memo-tbl td{padding:.3rem .5rem;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap}
+.memo-tbl td:first-child,.memo-tbl td:nth-child(2){text-align:left}
+.memo-tbl tr.tot td{font-weight:700;background:#DCE6F1}
+.summary{background:linear-gradient(180deg,#0f2d54,#102945);color:#fff;padding:2rem;margin-top:1.5rem;border-radius:14px}
+/* modal */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:900;display:none;align-items:center;justify-content:center;padding:1rem}
+.overlay.open{display:flex}
+#overlay{z-index:940}  /* entries modal stacks above the drill modal */
+.modal{background:#fff;border-radius:14px;width:100%;max-width:880px;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,.4)}
+.modal-head{display:flex;justify-content:space-between;align-items:flex-start;padding:1.1rem 1.4rem;border-bottom:2px solid #e2e8f0}
+.modal-head h3{font-size:1rem;color:#0f172a}.modal-head .sub{font-size:.74rem;color:#64748b;margin-top:.2rem}
+.modal-close{background:none;border:none;font-size:1.4rem;cursor:pointer;color:#94a3b8}
+.modal-body{padding:1rem 1.4rem;overflow-y:auto}
+@media(max-width:640px){.fb-inner{gap:.5rem}.kpi-grid{grid-template-columns:1fr 1fr}.search-input{width:100%}.tab-nav{top:150px}}
+.header-actions{display:flex;gap:.5rem;flex-shrink:0}
+.pubtrans-card{background:linear-gradient(135deg,#fff7ed 0%,#fffaf0 45%,#f5f3ff 100%);border:1px solid #fde8d2}
+.pubtrans-big{display:flex;gap:1rem;margin:.6rem 0 1.1rem}
+.pubtrans-stat{flex:1;text-align:center;border-radius:16px;padding:1.1rem .8rem;color:#fff;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.12);transition:transform .15s}
+.pubtrans-stat:hover{transform:translateY(-3px) scale(1.015)}
+.pubtrans-stat.pt{background:linear-gradient(135deg,#fb923c,#f97316 60%,#ea580c)}
+.pubtrans-stat.priv{background:linear-gradient(135deg,#a78bfa,#7c3aed 60%,#6d28d9)}
+.pubtrans-emoji{font-size:2rem;filter:drop-shadow(0 2px 3px rgba(0,0,0,.2))}
+.pubtrans-pct{font-size:1.9rem;font-weight:800;margin:.15rem 0;text-shadow:0 1px 3px rgba(0,0,0,.15)}
+.pubtrans-lbl{font-size:.74rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;opacity:.95}
+.pubtrans-sub{font-size:.7rem;opacity:.85;margin-top:.2rem}
+@media print{
+  .app-header,.filterbar,.tab-nav,.header-actions,.elink,.dtoggle,.overlay,.toolbar{display:none!important}
+  .tab-pane{display:block!important;page-break-before:always}
+  .tab-pane:first-of-type{page-break-before:auto}
+  .main{padding:0;max-width:100%}
+  body{background:#fff}
+}
+</style>
+</head>
+<body>
+<header class="app-header"><div class="header-inner">
+  {% if logo_url %}<img class="header-seal" src="{{ logo_url }}" alt="seal">
+  {% else %}<svg class="header-seal" viewBox="0 0 38 38"><circle cx="19" cy="19" r="18" fill="rgba(255,255,255,.1)"/><path d="M19 7L20.8 15.5L29 12L23.5 19.5L31 23.5L22.5 23.5L22.5 32L19 24.5L15.5 32L15.5 23.5L7 23.5L14.5 19.5L9 12L17.2 15.5Z" fill="rgba(255,215,0,.85)"/></svg>{% endif %}
+  <div class="header-brand"><h1>Assessment Division — Port of Batangas</h1><p>Bureau of Customs · Daily Collection &amp; Import Commodity Analysis</p></div>
+  <div class="header-meta" id="hmeta"></div>
+  <div class="header-actions">
+    <button class="save-btn" onclick="exportPDF()" title="Print / save every tab as a PDF">🖨️ Export PDF</button>
+    <button class="save-btn" onclick="exportStaticReport()" title="Save a frozen, read-only HTML copy — filters and drill-downs disabled">📄 Static report</button>
+  </div>
+</div></header>
+
+<div class="filterbar"><div class="fb-inner">
+  <div class="fb-group"><label>Period</label><input type="date" id="d-start"> <span style="color:#94a3b8">→</span> <input type="date" id="d-end"></div>
+  <div class="fb-group" id="presets"></div>
+  <div class="fb-group"><label>Oil</label><span class="chip active" data-oil="" onclick="setOil('',this)">Both</span><span class="chip" data-oil="Oil" onclick="setOil('Oil',this)">Oil</span><span class="chip" data-oil="Non-oil" onclick="setOil('Non-oil',this)">Non-oil</span></div>
+  <div class="fb-group" id="portchips"><label>Port</label></div>
+  <button class="fb-apply" onclick="applyFilters()">Apply ⟳</button>
+</div></div>
+
+<nav class="tab-nav"><div class="tab-nav-inner">
+  <button class="tab-btn active" data-tab="overview" onclick="showTab('overview')">Overview</button>
+  <button class="tab-btn" data-tab="collection" onclick="showTab('collection')">Daily Collection</button>
+  <button class="tab-btn" data-tab="oil" onclick="showTab('oil')">Oil / Non-oil</button>
+  <button class="tab-btn" data-tab="importers" onclick="showTab('importers')">Importers</button>
+  <button class="tab-btn" data-tab="commodities" onclick="showTab('commodities')">Commodities</button>
+  <button class="tab-btn" data-tab="cars" onclick="showTab('cars')">🚗 Car Imports</button>
+  <button class="tab-btn" data-tab="petro" onclick="showTab('petro')">⛽ Petroleum</button>
+  <button class="tab-btn" data-tab="memo" onclick="showTab('memo')">📝 Memo</button>
+</div></nav>
+
+<main class="main">
+  <div class="tab-pane active" id="tab-overview"></div>
+  <div class="tab-pane" id="tab-collection"></div>
+  <div class="tab-pane" id="tab-oil"></div>
+  <div class="tab-pane" id="tab-importers"></div>
+  <div class="tab-pane" id="tab-commodities"></div>
+  <div class="tab-pane" id="tab-cars"></div>
+  <div class="tab-pane" id="tab-petro"></div>
+  <div class="tab-pane" id="tab-memo"></div>
+</main>
+
+<div class="overlay" id="drillOverlay" onclick="if(event.target===this)closeDrillModal()">
+  <div class="modal"><div class="modal-head"><div><h3 id="d-title">Drill-down</h3><div class="sub">Click a row to drill deeper · ▦ for entry nos.</div></div><button class="modal-close" onclick="closeDrillModal()">×</button></div>
+  <div class="modal-body" id="d-body"></div></div>
+</div>
+<div class="overlay" id="overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal"><div class="modal-head"><div><h3 id="m-title">Entry numbers</h3><div class="sub" id="m-sub"></div></div><button class="modal-close" onclick="closeModal()">×</button></div>
+  <div class="modal-body" id="m-body"></div></div>
+</div>
+
+<script>
+const META = {{ meta | safe }};
+const state = {start:META.dmin, end:META.dmax, oil:'', ports:[], order:'revenue', commField:'i2', commDir:'c2i', carPT:'', carSub:'pt'};
+
+document.getElementById('hmeta').innerHTML =
+  'Data: <strong>'+META.dmin+' → '+META.dmax+'</strong><br>'+Number(META.line_items).toLocaleString()+' line items · '+META.file1;
+
+/* filter bar setup */
+const ds=document.getElementById('d-start'), de=document.getElementById('d-end');
+ds.min=de.min=META.dmin; ds.max=de.max=META.dmax; ds.value=META.dmin; de.value=META.dmax;
+const presets=[['Full span',()=> [META.dmin,META.dmax]],
+  ['YTD',()=>{const y=META.dmax.slice(0,4);return [y+'-01-01',META.dmax];}],
+  ['Latest month',()=>{return [META.dmax.slice(0,8)+'01',META.dmax];}],
+  ['Last 30d',()=>{const d=new Date(META.dmax);d.setDate(d.getDate()-29);return [d.toISOString().slice(0,10),META.dmax];}]];
+document.getElementById('presets').innerHTML='<label>Quick</label>'+presets.map((p,i)=>'<button class="preset" onclick="preset('+i+')">'+p[0]+'</button>').join('');
+function preset(i){const [s,e]=presets[i][1]();ds.value=s<META.dmin?META.dmin:s;de.value=e;applyFilters();}
+document.getElementById('portchips').innerHTML+=META.ports.map(p=>'<span class="chip" data-port="'+escAttr(p)+'" onclick="togglePort(this)">'+esc(p)+'</span>').join('');
+function setOil(v,el){state.oil=v;document.querySelectorAll('[data-oil]').forEach(c=>c.classList.toggle('active',c===el));}
+function togglePort(el){const p=el.getAttribute('data-port');const i=state.ports.indexOf(p);if(i>=0){state.ports.splice(i,1);el.classList.remove('active');}else{state.ports.push(p);el.classList.add('active');}}
+function applyFilters(){if(window.STATIC_MODE){alert('This is a frozen static report — the period/oil/port filters can\'t be changed. Drill-downs and entry numbers still work. Open the live dashboard to pick a different period.');return;}state.start=ds.value;state.end=de.value;render(curTab);}
+
+/* helpers */
+function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function escAttr(s){return esc(s).replace(/'/g,'&#39;');}
+const fmt={
+  php:v=>{v=+v||0;const a=Math.abs(v);if(a>=1e9)return'₱'+(v/1e9).toFixed(2)+'B';if(a>=1e6)return'₱'+(v/1e6).toFixed(2)+'M';if(a>=1e3)return'₱'+(v/1e3).toFixed(1)+'K';return'₱'+v.toFixed(0);},
+  phpF:v=>'₱'+(+v||0).toLocaleString('en-US',{maximumFractionDigits:0}),
+  num:v=>(+v||0).toLocaleString(),
+  kg:v=>{v=+v||0;if(Math.abs(v)>=1e6)return(v/1e6).toFixed(2)+'M kg';if(Math.abs(v)>=1e3)return(v/1e3).toFixed(1)+'K kg';return v.toFixed(0)+' kg';},
+  pct:v=>(v===null||v===undefined)?'<span class="neu">n.a.</span>':'<span class="'+(v>=0?'pos':'neg')+'">'+(v>=0?'▲ +':'▼ ')+v.toFixed(1)+'%</span>',
+};
+function qs(extra){const p=new URLSearchParams();p.set('start',state.start);p.set('end',state.end);if(state.oil)p.set('oil',state.oil);if(state.ports.length)p.set('ports',state.ports.join(','));if(extra)for(const k in extra)if(extra[k]!=null)p.set(k,extra[k]);return p.toString();}
+async function api(path,extra){
+  if(window.STATIC_MODE){
+    if(path==='/api/drill'||path==='/api/entries')return localApi(path,extra);
+    throw new Error('static report: '+path+' is not available offline');
+  }
+  const r=await fetch(path+'?'+qs(extra));if(!r.ok)throw new Error('HTTP '+r.status);return r.json();
+}
+/* ── Offline drill-down + entries engine (mirrors app.py's F/_iter/grp_list/entries logic),
+   used only when STATIC_MODE is true (see exportStaticReport()). EXPORT_RECORDS holds the
+   period's raw line items, decoded from the interned payload at /api/export_raw. ── */
+const X={ENTRY:0,REV:1,VOL:2,PORT:3,IMP:4,I2:5,GEN:6,SPEC:7,PROD:8,ORIG:9,HS4:10,HS6:11,HS8:12,HS11:13,
+  ISOIL:14,ISVEH:15,ISCKD:16,VCLASS:17,PT:18,UNITS:19,DSTR:20};
+const LFIELD={importer:X.IMP,commodity:X.I2,general:X.GEN,specific:X.SPEC,product:X.PROD,port:X.PORT,
+  origin:X.ORIG,hs6:X.HS6,hs11:X.HS11,hs4:X.HS4,hs8:X.HS8};
+function decodeExport(payload){
+  const strs=payload.strs, sf=[X.ENTRY,X.PORT,X.IMP,X.I2,X.GEN,X.SPEC,X.PROD,X.ORIG,X.HS4,X.HS6,X.HS8,X.HS11,X.VCLASS,X.PT];
+  return payload.rows.map(r=>{const row=r.slice();for(const fi of sf){const v=row[fi];row[fi]=v>=0?strs[v]:null;}return row;});
+}
+function localFilterPred(f){
+  return function(r){
+    if(f.oil==='Oil'&&!r[X.ISOIL])return false;
+    if(f.oil==='Non-oil'&&r[X.ISOIL])return false;
+    if(f.domain==='vehicle'){if(!r[X.ISVEH]||r[X.ISCKD])return false;}
+    else if(f.domain==='vehicle_ckd'){if(!r[X.ISVEH]||!r[X.ISCKD])return false;}
+    else if(f.domain==='car'){if(r[X.PT]==null)return false;}
+    else if(f.domain==='truck'){if(r[X.VCLASS]!=='Truck')return false;}
+    else if(f.domain==='oil'){if(!r[X.ISOIL])return false;}
+    if(f.pt&&r[X.PT]!==f.pt)return false;
+    for(const c of f.cons){if(r[c[0]]!==c[1])return false;}
+    return true;
+  };
+}
+function localGrpList(records,f,fieldIdx,n,order){
+  const pred=localFilterPred(f),g=new Map();
+  for(const r of records){if(!pred(r))continue;const k=r[fieldIdx];let e=g.get(k);if(!e){e=[0,0,new Set(),0,0];g.set(k,e);}e[0]+=r[X.REV];e[1]+=r[X.VOL];e[2].add(r[X.ENTRY]);e[3]+=1;e[4]+=(r[X.UNITS]||0);}
+  let out=[...g.entries()].map(([k,v])=>({name:k,revenue:Math.round(v[0]*100)/100,volume:Math.round(v[1]*100)/100,entries:v[2].size,lines:v[3],units:Math.round(v[4])}));
+  const key=order==='volume'?'volume':'revenue';
+  out.sort((a,b)=>b[key]-a[key]);
+  return n?out.slice(0,n):out;
+}
+function localEntries(records,f){
+  const pred=localFilterPred(f),agg=new Map();
+  for(const r of records){if(!pred(r))continue;let e=agg.get(r[X.ENTRY]);if(!e){e=[0,0,0,r[X.DSTR],r[X.PORT],r[X.IMP]];agg.set(r[X.ENTRY],e);}e[0]+=r[X.REV];e[1]+=r[X.VOL];e[2]+=1;}
+  const out=[...agg.entries()].map(([k,v])=>({entry:k,revenue:Math.round(v[0]*100)/100,volume:Math.round(v[1]*100)/100,lines:v[2],date:v[3],port:v[4],importer:v[5]}));
+  out.sort((a,b)=>b.revenue-a.revenue);
+  return {rows:out.slice(0,1000),total:out.length};
+}
+function buildLocalFilter(extra){
+  extra=extra||{};let oil=extra.oil!=null?extra.oil:null;
+  const cons=[],pfname=extra.parent_field,pv=extra.parent_value;
+  if(pfname==='oilclass')oil=pv;else if(pfname&&LFIELD[pfname]!=null)cons.push([LFIELD[pfname],pv]);
+  for(const key in LFIELD){if(extra[key]!=null)cons.push([LFIELD[key],extra[key]]);}
+  return {oil,domain:extra.domain||null,pt:extra.pt||null,cons};
+}
+function localApi(path,extra){
+  extra=extra||{};
+  if(path==='/api/drill'){
+    const cf=LFIELD[extra.child_field];
+    if(cf==null)return{rows:[]};
+    return{rows:localGrpList(window.EXPORT_RECORDS||[],buildLocalFilter(extra),cf,80,extra.order||'revenue')};
+  }
+  if(path==='/api/entries')return localEntries(window.EXPORT_RECORDS||[],buildLocalFilter(extra));
+  return{rows:[]};
+}
+const charts={};
+function mkChart(id,cfg){if(charts[id])charts[id].destroy();const el=document.getElementById(id);if(el)charts[id]=new Chart(el,cfg);}
+Chart.defaults.font.family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif";Chart.defaults.font.size=11;Chart.defaults.color='#64748b';
+const C={oil:'#0d9488',non:'#d97706',blue:'#1d4ed8',grid:'rgba(0,0,0,.055)',target:'#f59e0b',
+  palette:['#1d4ed8','#0d9488','#d97706','#8b5cf6','#ec4899','#14b8a6','#f59e0b','#6366f1','#84cc16','#ef4444','#06b6d4','#a855f7']};
+const PTC={Electric:'#059669',Hybrid:'#8b5cf6',ICE:'#64748b'};
+function kpi(label,val,sub,cls,subcls){return '<div class="kpi-card '+(cls||'')+'"><div class="kpi-label">'+esc(label)+'</div><div class="kpi-value">'+val+'</div><div class="kpi-sub '+(subcls||'')+'">'+(sub||'')+'</div></div>';}
+function loading(el){el.innerHTML='<div class="loading">Loading…</div>';}
+
+/* tabs */
+let curTab='overview';
+function showTab(name){curTab=name;document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));document.getElementById('tab-'+name).classList.add('active');if(!window.STATIC_MODE)render(name);}
+const RENDER={overview:rOverview,collection:rCollection,oil:rOil,importers:rImporters,commodities:rCommodities,cars:rCars,petro:rPetro,memo:rMemo};
+function render(name){(RENDER[name]||(()=>{}))();}
+
+/* ── Overview ── */
+async function rOverview(){const el=document.getElementById('tab-overview');loading(el);const d=await api('/api/summary');const t=d.totals;
+  el.innerHTML=`<div class="section"><div class="sec-label">Totals · ${state.start} → ${state.end}</div><div class="kpi-grid">
+    ${kpi('Revenue (duties & taxes)',fmt.php(t.revenue),fmt.phpF(t.revenue),'')}
+    ${kpi('Declarations (distinct entry nos.)',fmt.num(t.entries),fmt.num(t.lines)+' line items','good')}
+    ${kpi('Volume',fmt.kg(t.volume),fmt.num(t.volume)+' kg','')}
+    ${kpi('Importers',fmt.num(t.n_importers),fmt.num(t.n_commodities)+' commodities · '+t.n_ports+' ports','')}
+    ${kpi('Avg per declaration',fmt.php(t.avg_per_entry),fmt.phpF(t.avg_per_entry),'')}
+  </div></div>
+  <div class="section"><div class="chart-row cols-2-1">
+    <div class="card"><div class="card-title">Monthly Revenue vs DBCC Target (PHP)</div><div class="ch-wrap"><canvas id="ch-month"></canvas></div></div>
+    <div class="card"><div class="card-title">Oil vs Non-oil — Revenue <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· click a slice to drill down</span></div><div class="pie-wrap"><canvas id="ch-pie"></canvas></div></div>
+  </div></div>
+  <div class="section"><div class="card"><div class="card-title">Daily Revenue (PHP)</div><div class="ch-wrap"><canvas id="ch-daily"></canvas></div></div></div>
+  <div class="section"><div class="chart-row cols-2">
+    <div class="card"><div class="card-title">Top Importers by Duties (share %) <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· click to drill down</span></div><div class="ch-wrap tall"><canvas id="ch-ti"></canvas></div></div>
+    <div class="card"><div class="card-title">Top Commodities by Duties (share %) <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· click to drill down</span></div><div class="ch-wrap tall"><canvas id="ch-tc"></canvas></div></div>
+  </div></div>`;
+  mkChart('ch-month',{data:{labels:d.monthly.map(m=>m.label),datasets:[
+    {type:'bar',label:'Revenue',data:d.monthly.map(m=>m.revenue),backgroundColor:C.blue,order:2},
+    {type:'line',label:'DBCC target',data:d.monthly.map(m=>m.target||null),borderColor:C.target,backgroundColor:C.target,borderWidth:2,pointRadius:3,order:1,spanGaps:true}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{tooltip:{callbacks:{label:c=>' '+c.dataset.label+': '+fmt.phpF(c.parsed.y)}}},scales:{y:{ticks:{callback:v=>fmt.php(v)},grid:{color:C.grid}},x:{grid:{display:false}}}}});
+  mkChart('ch-pie',{type:'doughnut',plugins:[window.ChartDataLabels].filter(Boolean),data:{labels:['Oil','Non-oil'],datasets:[{data:[d.oil_pie.Oil,d.oil_pie['Non-oil']],backgroundColor:[C.oil,C.non]}]},options:{responsive:true,maintainAspectRatio:false,cutout:'55%',onClick:(e,els)=>{if(els.length){const cl=els[0].index===0?'Oil':'Non-oil';openDrillModal(cl,{oil:cl},'oil');}},plugins:{datalabels:{color:'#fff',font:{weight:'700'},formatter:(v,c)=>{const t=c.dataset.data.reduce((a,b)=>a+b,0);return(v/t*100).toFixed(1)+'%';}},tooltip:{callbacks:{label:c=>' '+c.label+': '+fmt.phpF(c.parsed)}}}}});
+  mkChart('ch-daily',{type:'bar',data:{labels:d.daily.map(x=>x.date),datasets:[{data:d.daily.map(x=>x.revenue),backgroundColor:C.blue}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+fmt.phpF(c.parsed.y)}}},scales:{x:{grid:{display:false},ticks:{maxTicksLimit:14}},y:{ticks:{callback:v=>fmt.php(v)},grid:{color:C.grid}}}}});
+  donut('ch-ti',d.top_importers.slice(),t.revenue,(name,isOthers)=>{
+    if(isOthers)openDrillModal('All importers',{},'allImporters');
+    else openDrillModal('Importer: '+name,{importer:name},'importer');
+  });
+  donut('ch-tc',d.top_commodities.slice(),t.revenue,(name,isOthers)=>{
+    if(isOthers)openDrillModal('All commodities',{},'allCommodities');
+    else openDrillModal('Commodity: '+name,{commodity:name},'commodity');
+  });
+}
+function hbar(id,rows,key,color){mkChart(id,{type:'bar',data:{labels:rows.map(r=>r.name),datasets:[{data:rows.map(r=>r[key]),backgroundColor:color}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+fmt.phpF(c.parsed.x)}}},scales:{x:{ticks:{callback:v=>fmt.php(v)},grid:{color:C.grid}},y:{grid:{display:false},ticks:{callback:function(v){const l=this.getLabelForValue(v);return l.length>24?l.slice(0,24)+'…':l;}}}}}});}
+
+/* ── Daily Collection ── */
+function varKpi(label,p){if(!p.target)return kpi(label,fmt.php(p.revenue),'no DBCC target','');const cls=p.variance>=0?'good':'bad';return kpi(label,fmt.php(p.revenue),(p.variance>=0?'+':'')+fmt.phpF(p.variance)+' vs target ('+fmt.pctTxt(p.variance_pct)+')',cls,p.variance>=0?'pos':'neg');}
+fmt.pctTxt=v=>v==null?'n.a.':(v>=0?'+':'')+v.toFixed(1)+'%';
+async function rCollection(){const el=document.getElementById('tab-collection');loading(el);const d=await api('/api/collection');
+  el.innerHTML=`<div class="section"><div class="sec-label">Selected period vs DBCC target</div><div class="kpi-grid">
+    ${varKpi('Revenue collected',d.period)}
+    ${kpi('DBCC target (period)',fmt.php(d.period.target),fmt.phpF(d.period.target),'')}
+    ${kpi('Declarations',fmt.num(d.period.entries),'distinct entry nos.','')}
+    ${kpi('Volume',fmt.kg(d.period.volume),'','')}
+  </div></div>
+  <div class="section"><div class="sec-label">Year-to-date (Jan 1 → ${d.ytd.start?d.period.end:''})</div><div class="kpi-grid">
+    ${varKpi('YTD revenue',d.ytd)}
+    ${kpi('Cumulative DBCC target',fmt.php(d.ytd.target),fmt.phpF(d.ytd.target),'')}
+    ${kpi('YTD variance',fmt.php(d.ytd.variance),fmt.pctTxt(d.ytd.variance_pct),d.ytd.variance>=0?'good':'bad',d.ytd.variance>=0?'pos':'neg')}
+    ${d.yoy?kpi('vs last year',fmt.pctTxt(d.yoy.rev),'efficiency '+(d.yoy.efficiency!=null?d.yoy.efficiency.toFixed(1)+'%':'n.a.'),d.yoy.rev>=0?'good':'bad',d.yoy.rev>=0?'pos':'neg'):kpi('vs last year','n.a.','no prior-year file','')}
+  </div></div>
+  <div class="section"><div class="card"><div class="card-title">Cumulative Revenue (PHP)</div><div class="ch-wrap"><canvas id="ch-cum"></canvas></div></div></div>
+  <div class="section"><div class="card"><div class="card-title">Revenue Components (PHP)</div><div class="ch-wrap"><canvas id="ch-comp"></canvas></div></div></div>`;
+  mkChart('ch-cum',{type:'line',data:{labels:d.cumulative.map(x=>x.date),datasets:[{data:d.cumulative.map(x=>x.cum),borderColor:C.blue,backgroundColor:'rgba(29,78,216,.1)',fill:true,pointRadius:0,tension:.2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+fmt.phpF(c.parsed.y)}}},scales:{x:{grid:{display:false},ticks:{maxTicksLimit:12}},y:{ticks:{callback:v=>fmt.php(v)},grid:{color:C.grid}}}}});
+  hbar('ch-comp',d.components.map(c=>({name:c.component,revenue:c.amount})),'revenue','#6366f1');
+}
+
+/* ── Oil / Non-oil ── */
+async function rOil(){const el=document.getElementById('tab-oil');loading(el);const d=await api('/api/oil');const O=d.oil;
+  el.innerHTML=`<div class="note">MoM vs ${d.mom_label}${d.has_prior?'; YoY vs prior-year file':' (YoY needs a prior-year file)'}.</div>
+  <div class="section"><div class="chart-row cols-2">
+    <div class="card"><div class="card-title">Revenue by class <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· click a slice to drill down</span></div><div class="pie-wrap"><canvas id="ch-or"></canvas></div></div>
+    <div class="card"><div class="card-title">Volume by class</div><div class="ch-wrap"><canvas id="ch-ov"></canvas></div></div>
+  </div></div>
+  <div class="section"><div class="card"><div class="card-title">Oil / Non-oil — MoM & YoY</div><div class="table-wrap"><table class="dt"><thead><tr><th>Class</th><th class="num">Revenue</th><th class="num">Rev MoM</th><th class="num">Rev YoY</th><th class="num">Volume</th><th class="num">Vol MoM</th><th class="num">Vol YoY</th></tr></thead><tbody>
+    ${['Oil','Non-oil'].map(c=>`<tr><td><strong>${c}</strong></td><td class="num">${fmt.phpF(O[c].revenue)}</td><td class="num">${fmt.pct(O[c].rev_mom)}</td><td class="num">${fmt.pct(O[c].rev_yoy)}</td><td class="num">${fmt.num(O[c].volume)} kg</td><td class="num">${fmt.pct(O[c].vol_mom)}</td><td class="num">${fmt.pct(O[c].vol_yoy)}</td></tr>`).join('')}
+  </tbody></table></div></div></div>
+  <div class="section"><div class="card"><div class="card-title">Drill-down — Oil / Non-oil → importer → general → specific → goods</div><div class="note">Click a class to pop out the drill (importer → general → specific → goods); ▦ for entry nos.</div>
+  <div class="table-wrap"><table class="dt"><thead><tr><th>Class</th><th class="num">Revenue</th><th class="num">Volume</th><th></th></tr></thead><tbody>
+  ${['Oil','Non-oil'].map(cl=>`<tr class="drill-row" onclick="openDrillModal('${cl}',{oil:'${cl}'},'oilimp')"><td><strong>${cl}</strong> &nbsp;<span class="muted">▸ drill</span></td><td class="num">${fmt.phpF(O[cl].revenue)}</td><td class="num">${fmt.num(O[cl].volume)} kg</td><td><span class="elink" data-cons='{"oil":"${cl}"}' onclick="event.stopPropagation();entriesFromCons(this)">▦</span></td></tr>`).join('')}
+  </tbody></table></div></div></div>`;
+  mkChart('ch-or',{type:'doughnut',plugins:[window.ChartDataLabels].filter(Boolean),data:{labels:['Oil','Non-oil'],datasets:[{data:[O.Oil.revenue,O['Non-oil'].revenue],backgroundColor:[C.oil,C.non]}]},options:{responsive:true,maintainAspectRatio:false,cutout:'55%',onClick:(e,els)=>{if(els.length){const cl=els[0].index===0?'Oil':'Non-oil';openDrillModal(cl,{oil:cl},'oil');}},plugins:{datalabels:{color:'#fff',font:{weight:'700'},formatter:(v,c)=>{const t=c.dataset.data.reduce((a,b)=>a+b,0);return(v/t*100).toFixed(1)+'%';}},tooltip:{callbacks:{label:c=>' '+c.label+': '+fmt.phpF(c.parsed)}}}}});
+  mkChart('ch-ov',{type:'bar',data:{labels:['Oil','Non-oil'],datasets:[{data:[O.Oil.volume,O['Non-oil'].volume],backgroundColor:[C.oil,C.non]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+fmt.num(c.parsed.y)+' kg'}}},scales:{y:{ticks:{callback:v=>fmt.kg(v)},grid:{color:C.grid}}}}});
+}
+
+/* ── generic drill table (parent rows -> lazy children -> entries) ── */
+function drillTable(rows,opts){
+  // opts: parentNoun, cols(child header label), childFetch(name)->extra params, entryParam(name)->{}, valueFmt
+  let h='<div class="table-wrap"><table class="dt"><thead><tr><th></th><th>#</th><th>'+opts.parentNoun+'</th><th class="num">Revenue</th><th class="num">Volume</th><th class="num">Declarations</th><th></th></tr></thead><tbody>';
+  rows.forEach((r,i)=>{const nm=escAttr(r.name);
+    h+=`<tr class="drill-row" data-name="${nm}" onclick="toggleDrill(this,'${opts.kind}')"><td><span class="dtoggle">▶</span></td><td class="rank">${i+1}</td><td class="name">${esc(r.name)}</td><td class="num">${fmt.phpF(r.revenue)}</td><td class="num">${fmt.num(r.volume)}</td><td class="num">${fmt.num(r.entries)}</td><td><span class="elink" onclick="event.stopPropagation();showEntries('${opts.kind}','${nm}')">▦ entry nos</span></td></tr>`;
+    h+=`<tr class="sub-row" style="display:none"><td colspan="7"><div class="sub-panel"></div></td></tr>`;});
+  return h+'</tbody></table></div>';
+}
+const DRILL={};
+async function toggleDrill(tr,kind){const sub=tr.nextElementSibling,tog=tr.querySelector('.dtoggle');const open=sub.style.display!=='none';
+  if(open){sub.style.display='none';tog.classList.remove('open');return;}
+  sub.style.display='table-row';tog.classList.add('open');const panel=sub.querySelector('.sub-panel');
+  if(panel.dataset.loaded)return;panel.innerHTML='<div class="loading">Loading…</div>';
+  const cfg=DRILL[kind];const name=tr.getAttribute('data-name');
+  const d=await api('/api/drill',{parent_field:cfg.pf,parent_value:name,child_field:cfg.cf,order:state.order});
+  let h='<table class="subdt"><thead><tr><th>#</th><th>'+cfg.childNoun+'</th><th class="num">Revenue</th><th class="num">Volume</th><th class="num">Declarations</th><th></th></tr></thead><tbody>';
+  d.rows.forEach((c,j)=>{const cv=escAttr(c.name);h+=`<tr><td class="rank">${j+1}</td><td>${esc(c.name)}</td><td class="num">${fmt.phpF(c.revenue)}</td><td class="num">${fmt.num(c.volume)}</td><td class="num">${fmt.num(c.entries)}</td><td><span class="elink" onclick="showEntries2('${cfg.pf}','${escAttr(name)}','${cfg.cf}','${cv}')">▦ entry nos</span></td></tr>`;});
+  panel.innerHTML=h+'</tbody></table>';panel.dataset.loaded='1';
+}
+/* entries modal */
+function openModal(title,sub){document.getElementById('m-title').textContent=title;document.getElementById('m-sub').textContent=sub||'';document.getElementById('m-body').innerHTML='<div class="loading">Loading…</div>';document.getElementById('overlay').classList.add('open');}
+function closeModal(){document.getElementById('overlay').classList.remove('open');}
+function renderEntries(d){const b=document.getElementById('m-body');if(!d.rows.length){b.innerHTML='<div class="muted">No entries.</div>';return;}
+  let h=(d.total>d.rows.length?`<div class="note">Showing top ${d.rows.length} of ${fmt.num(d.total)} declarations (by revenue).</div>`:`<div class="note">${fmt.num(d.total)} declaration(s).</div>`);
+  h+='<div class="table-wrap"><table class="dt"><thead><tr><th>Entry no.</th><th>Date</th><th>Port</th><th class="name">Importer</th><th class="num">Revenue</th><th class="num">Volume</th><th class="num">Lines</th></tr></thead><tbody>';
+  d.rows.forEach(r=>{h+=`<tr><td><strong>${esc(r.entry)}</strong></td><td>${esc(r.date)}</td><td>${esc(r.port)}</td><td class="name">${esc(r.importer)}</td><td class="num">${fmt.phpF(r.revenue)}</td><td class="num">${fmt.num(r.volume)}</td><td class="num">${fmt.num(r.lines)}</td></tr>`;});
+  b.innerHTML=h+'</tbody></table></div>';}
+async function showEntries(kind,name){const cfg=DRILL[kind];openModal('Entry numbers',cfg.parentNoun+': '+name);const ex={};ex[cfg.pfKey]=name;const d=await api('/api/entries',ex);renderEntries(d);}
+async function showEntries2(pf,pv,cf,cv){openModal('Entry numbers',pv+' · '+cv);const ex={};ex[fieldKey(pf)]=pv;ex[fieldKey(cf)]=cv;const d=await api('/api/entries',ex);renderEntries(d);}
+function fieldKey(f){return f;}
+/* generic: pass any {field:value} constraints (importer/product/commodity/hs6/hs11/...) */
+async function showEntriesC(cons,subtitle){openModal('Entry numbers',subtitle||'');const d=await api('/api/entries',cons);renderEntries(d);}
+
+/* ── generic nested drill — chains starting from oil class / commodity / importer ── */
+const STEP={general:{f:'general',l:'General description'},specific:{f:'specific',l:'Specific description'},
+            importer:{f:'importer',l:'Importer'},product:{f:'product',l:'Goods description'},
+            commodity:{f:'commodity',l:'Commodity'}};
+const CHAINS={
+  oil:      [STEP.general,STEP.specific,STEP.importer,STEP.product],  // → general → specific → importer → goods
+  commodity:[STEP.general,STEP.specific,STEP.importer,STEP.product],
+  general:  [STEP.specific,STEP.importer,STEP.product],               // general desc → specific → importer → goods
+  importer: [STEP.general,STEP.specific,STEP.product],                // importer → general → specific → goods
+  oilimp:   [STEP.importer,STEP.general,STEP.specific,STEP.product],  // oil/non-oil drill-down table → importer first
+  carport:  [STEP.importer,STEP.general,STEP.specific,STEP.product],  // car units-by-port → importer first
+  ckdimp:   [STEP.general,STEP.specific,STEP.product],                // CKD importer → general → specific → goods
+  petrofuel:[STEP.general,STEP.importer],                             // fuel type (already known) → general → importer
+  petroport:[STEP.importer,STEP.general,STEP.specific,STEP.product],  // petroleum by-port → importer first
+  allImporters: [STEP.importer,STEP.general,STEP.specific,STEP.product],  // Overview "Others" slice → full importer list
+  allCommodities:[STEP.commodity,STEP.general,STEP.specific,STEP.importer,STEP.product], // Overview "Others" slice → full commodity list
+  brand:    [STEP.general,STEP.specific],                            // car brand (already known) → general → specific
+  motorVeh:   [STEP.importer,STEP.specific,STEP.product],            // motor vehicles (general desc known) → importer → specific → goods
+  motorVehImp:[STEP.specific,STEP.product],                          // motor vehicles, importer already known → specific → goods
+  motorVehParts:[STEP.importer,STEP.product],                        // parts & accessories carve-out → importer → goods (specific desc is fixed)
+};
+async function drillLevel(panel,cons,chainName,level){
+  panel.innerHTML='<div class="loading">Loading…</div>';
+  const chain=CHAINS[chainName],cfg=chain[level],leaf=level>=chain.length-1;
+  const d=await api('/api/drill',Object.assign({child_field:cfg.f},cons));
+  const total=d.rows.reduce((a,r)=>a+r.revenue,0);
+  const pct=r=>total?(r.revenue/total*100).toFixed(1)+'%':'—';
+  const ncols=leaf?6:7;
+  let h='<table class="subdt"><thead><tr>'+(leaf?'':'<th></th>')+'<th>'+cfg.l+'</th><th class="num">Revenue</th><th class="num">Share</th><th class="num">Volume</th><th class="num">Declarations</th><th></th></tr></thead><tbody>';
+  d.rows.forEach(r=>{const cc=Object.assign({},cons);cc[cfg.f]=r.name;const cj=escAttr(JSON.stringify(cc));
+    if(leaf){
+      h+=`<tr><td>${esc(r.name)}</td><td class="num">${fmt.phpF(r.revenue)}</td><td class="num">${pct(r)}</td><td class="num">${fmt.num(r.volume)}</td><td class="num">${fmt.num(r.entries)}</td><td><span class="elink" data-cons="${cj}" onclick="entriesFromCons(this)">▦ entry nos</span></td></tr>`;
+    }else{
+      h+=`<tr class="drill-row" data-cons="${cj}" data-chain="${chainName}" data-level="${level+1}" onclick="drillToggle(this)"><td><span class="dtoggle">▶</span></td><td>${esc(r.name)}</td><td class="num">${fmt.phpF(r.revenue)}</td><td class="num">${pct(r)}</td><td class="num">${fmt.num(r.volume)}</td><td class="num">${fmt.num(r.entries)}</td><td><span class="elink" data-cons="${cj}" onclick="event.stopPropagation();entriesFromCons(this)">▦</span></td></tr>`;
+      h+=`<tr class="sub-row" style="display:none"><td colspan="${ncols}"><div class="dpanel"></div></td></tr>`;
+    }});
+  if(!d.rows.length)h+='<tr><td colspan="'+ncols+'" class="muted">No detail.</td></tr>';
+  panel.innerHTML=h+'</tbody></table>';
+}
+async function drillToggle(tr){const sub=tr.nextElementSibling,tog=tr.querySelector('.dtoggle'),open=sub.style.display!=='none';
+  if(open){sub.style.display='none';tog.classList.remove('open');return;}
+  sub.style.display='table-row';tog.classList.add('open');
+  const panel=sub.querySelector('.dpanel');if(panel.dataset.loaded)return;
+  await drillLevel(panel,JSON.parse(tr.getAttribute('data-cons')),tr.getAttribute('data-chain'),parseInt(tr.getAttribute('data-level')));
+  panel.dataset.loaded='1';
+}
+function entriesFromConsObj(cons){
+  const parts=[];if(cons.oil)parts.push(cons.oil);
+  Object.keys(cons).filter(k=>!['oil','domain','pt'].includes(k)).forEach(k=>parts.push(cons[k]));
+  showEntriesC(cons,parts.join(' · '));
+}
+function entriesFromCons(el){entriesFromConsObj(JSON.parse(el.getAttribute('data-cons')));}
+/* doughnut with % datalabels; onPick(name,isOthers) fires when a slice is clicked —
+   isOthers is true for the synthetic "Others" wedge (name is null then; callers that
+   want a pop-out for it should ignore name and open their own "show everything" chain).
+   valKey/fmtFn let callers plot a non-revenue metric (e.g. MT volume). */
+function donut(id,rows,total,onPick,valKey,fmtFn){
+  valKey=valKey||'revenue';fmtFn=fmtFn||fmt.phpF;
+  const labels=rows.map(r=>r.name), vals=rows.map(r=>r[valKey]);
+  const sum=vals.reduce((a,b)=>a+b,0), others=Math.max(0,(total||sum)-sum);
+  if(others>1) {labels.push('Others'); vals.push(others);}
+  mkChart(id,{type:'doughnut',plugins:[window.ChartDataLabels].filter(Boolean),
+    data:{labels,datasets:[{data:vals,backgroundColor:C.palette.concat(['#cbd5e1','#e2e8f0'])}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'52%',
+      onClick:(e,els)=>{if(els.length&&onPick){const l=labels[els[0].index];if(l){const isOthers=l==='Others';onPick(isOthers?null:l,isOthers);}}},plugins:{
+      legend:{position:'right',labels:{boxWidth:10,font:{size:10}}},
+      datalabels:{color:'#fff',font:{weight:'700',size:10},formatter:(v,c)=>{const t=c.dataset.data.reduce((a,b)=>a+b,0);const p=v/t*100;return p>=4?p.toFixed(1)+'%':'';}},
+      tooltip:{callbacks:{label:c=>{const t=c.dataset.data.reduce((a,b)=>a+b,0);return ' '+c.label+': '+fmtFn(c.parsed)+' ('+(c.parsed/t*100).toFixed(1)+'%)';}}}}}});
+}
+/* drill pop-out modal (separate overlay so the entries modal can stack on top) */
+function openDrillModal(title,base,chainName){
+  document.getElementById('d-title').textContent=title;
+  document.getElementById('d-body').innerHTML='<div class="loading">Loading…</div>';
+  document.getElementById('drillOverlay').classList.add('open');
+  drillLevel(document.getElementById('d-body'),base,chainName,0);
+}
+function closeDrillModal(){document.getElementById('drillOverlay').classList.remove('open');}
+
+/* ── Importers ── */
+async function rImporters(){if(window.STATIC_MODE)return;const el=document.getElementById('tab-importers');loading(el);DRILL.imp={pf:'importer',pfKey:'importer',cf:'product',parentNoun:'Importer',childNoun:'Product',kind:'imp'};
+  const d=await api('/api/importers');let rows=d.rows;
+  el.innerHTML=`<div class="toolbar">
+    <span class="chip ${state.order==='revenue'?'active':''}" onclick="state.order='revenue';rImporters()">By revenue</span>
+    <span class="chip ${state.order==='volume'?'active':''}" onclick="state.order='volume';rImporters()">By volume</span>
+    <input class="search-input" id="impq" placeholder="Search importer…" oninput="filterTbl('imp-tb',this.value)">
+  </div>
+  <div class="card"><div class="card-title">Top importers — click a row to drill down (pop-out); ▦ for entry nos. <span class="muted">(MoM=latest vs prev month${d.has_prior?'; YoY vs prior file':''})</span></div>
+  <div class="table-wrap"><table class="dt"><thead><tr><th>#</th><th>Importer</th><th class="num">Revenue</th><th class="num">ΔRev MoM</th><th class="num">ΔRev YoY</th><th class="num">Volume</th><th class="num">Declarations</th><th></th></tr></thead><tbody id="imp-tb">
+  ${rows.map((r,i)=>{const nm=escAttr(r.name);const cj=escAttr(JSON.stringify({importer:r.name}));return `<tr class="drill-row" data-name="${nm}" data-search="${nm.toLowerCase()}" onclick="openDrillModal('Importer: '+this.dataset.name,{importer:this.dataset.name},'importer')"><td class="rank">${i+1}</td><td class="name">${esc(r.name)}${r.new?' <span class="tag-new">NEW</span>':''}</td><td class="num">${fmt.phpF(r.revenue)}</td><td class="num">${fmt.pct(r.rev_mom)}</td><td class="num">${fmt.pct(r.rev_yoy)}</td><td class="num">${fmt.num(r.volume)}</td><td class="num">${fmt.num(r.entries)}</td><td><span class="elink" data-cons="${cj}" onclick="event.stopPropagation();entriesFromCons(this)">▦</span></td></tr>`;}).join('')}
+  </tbody></table></div></div>`;
+}
+function filterTbl(tbId,q){q=(q||'').toLowerCase();document.querySelectorAll('#'+tbId+' tr.drill-row').forEach(tr=>{tr.style.display=tr.getAttribute('data-search').includes(q)?'':'none';});}
+
+/* ── Commodities ── */
+async function rCommodities(){if(window.STATIC_MODE)return;const el=document.getElementById('tab-commodities');loading(el);
+  const isGd=state.commField==='gd';
+  const d=await api('/api/commodities',{field:isGd?'gd':'i2'});
+  const dg=isGd?d:await api('/api/commodities',{field:'gd'});
+  const gdTotal=dg.rows.reduce((a,r)=>a+r.revenue,0);
+  const label=isGd?'General: ':'Commodity: ', chain=isGd?'general':'commodity';
+  el.innerHTML=`<div class="section"><div class="card"><div class="card-title">Share by general description (%) <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· click to drill down</span></div><div class="ch-wrap tall"><canvas id="ch-gd"></canvas></div></div></div>
+  <div class="section"><div class="toolbar">
+      <span class="chip ${!isGd?'active':''}" onclick="state.commField='i2';rCommodities()">INDEX2 bucket</span>
+      <span class="chip ${isGd?'active':''}" onclick="state.commField='gd';rCommodities()">GENERAL DESC</span>
+    </div><div class="card"><div class="card-title">Top commodities — click a row to drill down (pop-out); ▦ for entry nos.</div>
+    <div class="table-wrap"><table class="dt"><thead><tr><th>#</th><th>${isGd?'General description':'Commodity'}</th><th class="num">Revenue</th><th class="num">ΔRev MoM</th><th class="num">ΔRev YoY</th><th class="num">Volume</th><th class="num">Declarations</th><th></th></tr></thead><tbody>
+    ${d.rows.map((r,i)=>{const nm=escAttr(r.name);const cj=escAttr(JSON.stringify(isGd?{general:r.name}:{commodity:r.name}));const base=isGd?'{general:this.dataset.name}':'{commodity:this.dataset.name}';return `<tr class="drill-row" data-name="${nm}" onclick="openDrillModal('${label}'+this.dataset.name,${base},'${chain}')"><td class="rank">${i+1}</td><td class="name">${esc(r.name)}${r.new?' <span class="tag-new">NEW</span>':''}</td><td class="num">${fmt.phpF(r.revenue)}</td><td class="num">${fmt.pct(r.rev_mom)}</td><td class="num">${fmt.pct(r.rev_yoy)}</td><td class="num">${fmt.num(r.volume)}</td><td class="num">${fmt.num(r.entries)}</td><td><span class="elink" data-cons="${cj}" onclick="event.stopPropagation();entriesFromCons(this)">▦</span></td></tr>`;}).join('')}
+    </tbody></table></div></div></div>`;
+  donut('ch-gd',dg.rows.slice(0,12),gdTotal,(name,isOthers)=>{if(!isOthers)openDrillModal('General: '+name,{general:name},'general');});
+}
+
+/* ── Cars ── */
+function setCarPT(pt){state.carPT=pt;renderCarPT();}
+const CAR_SUBS=['pt','comm','brand','motorveh','parts'];
+const CAR_SUB_LABEL={pt:'🚗 Cars & Pickups (powertrain)',comm:'🚛 Trucks',brand:'🏷️ By Brand',motorveh:'🚌 Motor Vehicles',parts:'🔧 Parts & Accessories'};
+function setCarSub(s){state.carSub=s;
+  if(window.STATIC_MODE){
+    CAR_SUBS.forEach(k=>{const p=document.getElementById('car-pane-'+k);if(p)p.style.display=k===s?'':'none';});
+    document.querySelectorAll('#tab-cars .chip').forEach(c=>c.classList.toggle('active',c.textContent===CAR_SUB_LABEL[s]));
+    return;
+  }
+  rCars();}
+async function rCars(){const el=document.getElementById('tab-cars');if(!state.carSub)state.carSub='pt';
+  el.innerHTML=`<div class="toolbar" style="margin-bottom:1rem">
+    ${CAR_SUBS.map(k=>`<span class="chip ${state.carSub===k?'active':''}" onclick="setCarSub('${k}')">${CAR_SUB_LABEL[k]}</span>`).join('')}
+  </div>${CAR_SUBS.map(k=>`<div id="car-pane-${k}" ${state.carSub===k?'':'style="display:none"'}></div>`).join('')}`;
+  if(state.carSub==='motorveh'){renderMotorVehicles();return;}
+  if(state.carSub==='parts'){renderMotorVehicleParts();return;}
+  if(state.carSub==='comm'){renderTrucks();return;}
+  if(state.carSub==='brand'){renderBrands();return;}
+  renderCarPT();
+}
+async function renderCarPT(){if(window.STATIC_MODE)return;const el=document.getElementById('car-pane-pt');loading(el);DRILL_CAR=true;
+  const d=await api('/api/cars',{powertrain:state.carPT||null});
+  const mixsum=d.mix.reduce((a,b)=>a+b.units,0);
+  el.innerHTML=`<div class="note">Passenger cars (HS 8703) + pickups (HS 8704.21/.31/.41/.51, e.g. Hilux/D-Max/Triton). CKD/parts excluded. Powertrain by HS code — ICE 8703.21–8703.33 + ICE pickups · Hybrid 8703.40–8703.70 · Electric 8703.80 + electric pickups (8704.60). Medium/heavy trucks are in the 🚛 Trucks sub-tab; buses are excluded.</div>
+  <div class="section"><div class="sec-label">Powertrain mix — cars + pickups</div><div class="kpi-grid">
+    ${d.mix.map(m=>kpi(m.name,fmt.num(m.units),(m.units/(mixsum||1)*100).toFixed(1)+'% · '+fmt.num(m.entries)+' decl.','')).join('')}
+    ${kpi('Total (cars + pickups)',fmt.num(d.total_units),'CBU units','good')}
+  </div></div>
+  <div class="toolbar"><span style="font-size:.78rem;font-weight:600;color:#64748b">Filter:</span>
+    ${['All','Electric','Hybrid','ICE'].map(p=>`<span class="chip ${(state.carPT||'All')===p?'active':''}" onclick="setCarPT('${p==='All'?'':p}')">${p}</span>`).join('')}</div>
+  <div class="section"><div class="chart-row cols-2">
+    <div class="card"><div class="card-title">Units by port (${esc(d.powertrain)}) <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· click a row to drill down (pop-out); ▦ for entry nos.</span></div><div class="table-wrap"><table class="dt"><thead><tr><th>#</th><th>Port</th><th class="num">Units</th><th class="num">Share</th><th class="num">Declarations</th><th class="num">Duties</th><th></th></tr></thead><tbody>
+      ${d.by_port.map((b,i)=>{const pv=escAttr(b.port);return `<tr class="drill-row" data-port="${pv}" onclick="carPortDrill(this)"><td class="rank">${i+1}</td><td>${esc(b.port)}</td><td class="num">${fmt.num(b.units)}</td><td class="num">${(b.units/d.by_port.reduce((a,x)=>a+x.units,0)*100||0).toFixed(1)}%</td><td class="num">${fmt.num(b.entries)}</td><td class="num">${fmt.phpF(b.duties)}</td><td><span class="elink" onclick="event.stopPropagation();carPortEntries(this)">▦</span></td></tr>`;}).join('')}
+    </tbody></table></div></div>
+    <div class="card"><div class="card-title">Powertrain by port (units)</div><div class="ch-wrap"><canvas id="ch-cpt"></canvas></div></div>
+  </div></div>
+  <div class="section"><div class="card"><div class="card-title">Top car importers — click for their vehicles; ▦ for entry nos.</div>
+  <div class="table-wrap"><table class="dt"><thead><tr><th></th><th>#</th><th>Importer</th><th class="num">Units</th><th class="num">Declarations</th><th class="num">Duties</th><th></th></tr></thead><tbody>
+  ${d.top_importers.map((r,i)=>{const nm=escAttr(r.name);return `<tr class="drill-row" data-name="${nm}" onclick="toggleCar(this)"><td><span class="dtoggle">▶</span></td><td class="rank">${i+1}</td><td class="name">${esc(r.name)}</td><td class="num">${fmt.num(r.units)}</td><td class="num">${fmt.num(r.entries)}</td><td class="num">${fmt.phpF(r.revenue)}</td><td><span class="elink" onclick="event.stopPropagation();showEntriesCar('${nm}')">▦</span></td></tr><tr class="sub-row" style="display:none"><td colspan="7"><div class="sub-panel"></div></td></tr>`;}).join('')}
+  </tbody></table></div></div></div>
+  <div class="section"><div class="card"><div class="card-title">🔧 CKD / knock-down parts (excluded from unit counts) <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· click a row to drill down (pop-out); ▦ for entry nos.</span></div><div class="table-wrap"><table class="dt"><thead><tr><th>#</th><th>Importer</th><th class="num">Declarations</th><th class="num">Line items</th><th class="num">Duties</th><th></th></tr></thead><tbody>
+    ${d.ckd.map((c,i)=>{const pv=escAttr(c.name);return `<tr class="drill-row" data-imp="${pv}" onclick="ckdDrill(this)"><td class="rank">${i+1}</td><td class="name">${esc(c.name)}</td><td class="num">${fmt.num(c.entries)}</td><td class="num">${fmt.num(c.lines)}</td><td class="num">${fmt.phpF(c.duties)}</td><td><span class="elink" onclick="event.stopPropagation();ckdEntries(this)">▦</span></td></tr>`;}).join('')}
+  </tbody></table></div></div></div>`;
+  const pbp=d.powertrain_by_port;mkChart('ch-cpt',{type:'bar',data:{labels:pbp.map(p=>p.port),datasets:['Electric','Hybrid','ICE'].map(pt=>({label:pt,data:pbp.map(p=>p[pt]||0),backgroundColor:PTC[pt]}))},options:{responsive:true,maintainAspectRatio:false,plugins:{tooltip:{callbacks:{label:c=>' '+c.dataset.label+': '+fmt.num(c.parsed.y)}}},scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,ticks:{callback:v=>fmt.num(v)},grid:{color:C.grid}}}}});
+}
+function carPortDrill(tr){const port=tr.dataset.port;const cons=Object.assign({port,domain:'car'},state.carPT?{pt:state.carPT}:{});openDrillModal(port+' — Cars & Pickups',cons,'carport');}
+function carPortEntries(el){const port=el.closest('tr').dataset.port;const cons=Object.assign({port,domain:'car'},state.carPT?{pt:state.carPT}:{});entriesFromConsObj(cons);}
+function ckdDrill(tr){const imp=tr.dataset.imp;openDrillModal('CKD: '+imp,{importer:imp,domain:'vehicle_ckd'},'ckdimp');}
+function ckdEntries(el){const imp=el.closest('tr').dataset.imp;entriesFromConsObj({importer:imp,domain:'vehicle_ckd'});}
+let DRILL_CAR=false;
+async function toggleCar(tr){const sub=tr.nextElementSibling,tog=tr.querySelector('.dtoggle');const open=sub.style.display!=='none';if(open){sub.style.display='none';tog.classList.remove('open');return;}sub.style.display='table-row';tog.classList.add('open');const panel=sub.querySelector('.sub-panel');if(panel.dataset.loaded)return;
+  if(window.STATIC_MODE){panel.innerHTML='<div class="muted">Model breakdown isn\'t baked into the static report — use the importer\'s pop-out drill-down or ▦ entry nos. instead.</div>';panel.dataset.loaded='1';return;}
+  panel.innerHTML='<div class="loading">Loading…</div>';
+  const imp=tr.getAttribute('data-name');
+  const d=await api('/api/car_products',{importer:imp,powertrain:state.carPT||null});
+  let h='<table class="subdt"><thead><tr><th>Model / description</th><th>Power</th><th>Class</th><th>HS8</th><th>Origin</th><th class="num">Units</th><th class="num">Decl.</th><th class="num">Duties</th><th></th></tr></thead><tbody>';
+  d.rows.forEach(p=>{h+=`<tr><td>${esc(p.product)}</td><td>${esc(p.powertrain)}</td><td>${esc(p.vclass)}</td><td>${esc(p.hs8)}</td><td>${esc(p.origin)}</td><td class="num">${fmt.num(p.units)}</td><td class="num">${fmt.num(p.entries)}</td><td class="num">${fmt.phpF(p.duties)}</td><td><span class="elink" data-imp="${esc(imp)}" data-prod="${esc(p.product)}" onclick="showEntriesC({importer:this.dataset.imp,product:this.dataset.prod},this.dataset.imp+' · '+this.dataset.prod)">▦ entry nos</span></td></tr>`;});
+  panel.innerHTML=h+'</tbody></table>';panel.dataset.loaded='1';
+}
+async function showEntriesCar(name){openModal('Entry numbers','Car importer: '+name);const d=await api('/api/entries',{importer:name});renderEntries(d);}
+
+/* ── Trucks sub-tab (medium/heavy goods vehicles) ── */
+async function renderTrucks(){const el=document.getElementById('car-pane-comm');loading(el);
+  const d=await api('/api/trucks');const t=d.totals;
+  el.innerHTML=`<div class="note">Medium/heavy trucks (HS 8704.10 dumpers · 8704.22/.23 & .32/.42/.43/.52 medium-heavy · 8704.90 · electric 8704.60). Pickups (≤5 t) are counted with cars in the 🚗 sub-tab. Units exclude CKD/parts; declarations = distinct entry nos.</div>
+  <div class="section"><div class="kpi-grid">
+    ${kpi('Truck units',fmt.num(t.units),fmt.num(t.entries)+' declarations','good')}
+    ${kpi('Duties & taxes',fmt.php(t.duties),fmt.phpF(t.duties),'')}
+    ${kpi('Electric trucks',fmt.num(t.electric_units),'8704.60 electric goods vehicles','oil')}
+  </div></div>
+  <div class="section"><div class="card"><div class="card-title">By port</div><div class="table-wrap"><table class="dt"><thead><tr><th>#</th><th>Port</th><th class="num">Units</th><th class="num">Declarations</th><th class="num">Duties</th></tr></thead><tbody>
+    ${d.by_port.map((p,i)=>`<tr><td class="rank">${i+1}</td><td>${esc(p.port)}</td><td class="num">${fmt.num(p.units)}</td><td class="num">${fmt.num(p.entries)}</td><td class="num">${fmt.phpF(p.duties)}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">No trucks in range.</td></tr>'}
+  </tbody></table></div></div></div>
+  <div class="section"><div class="card"><div class="card-title">Top importers — click a row for their truck models; ▦ for entry nos.</div><div class="table-wrap"><table class="dt"><thead><tr><th></th><th>#</th><th>Importer</th><th class="num">Units</th><th class="num">Declarations</th><th class="num">Duties</th><th></th></tr></thead><tbody>
+    ${d.top_importers.map((r,i)=>{const nm=escAttr(r.name);return `<tr class="drill-row" data-name="${nm}" onclick="toggleTruck(this)"><td><span class="dtoggle">▶</span></td><td class="rank">${i+1}</td><td class="name">${esc(r.name)}</td><td class="num">${fmt.num(r.units)}</td><td class="num">${fmt.num(r.entries)}</td><td class="num">${fmt.phpF(r.duties)}</td><td><span class="elink" data-imp="${esc(r.name)}" onclick="event.stopPropagation();showEntriesC({importer:this.dataset.imp},'Trucks · '+this.dataset.imp)">▦</span></td></tr><tr class="sub-row" style="display:none"><td colspan="7"><div class="sub-panel"></div></td></tr>`;}).join('')||'<tr><td colspan="7" class="muted">No trucks in range.</td></tr>'}
+  </tbody></table></div></div></div>`;
+}
+async function toggleTruck(tr){const sub=tr.nextElementSibling,tog=tr.querySelector('.dtoggle');const open=sub.style.display!=='none';if(open){sub.style.display='none';tog.classList.remove('open');return;}sub.style.display='table-row';tog.classList.add('open');const panel=sub.querySelector('.sub-panel');if(panel.dataset.loaded)return;
+  if(window.STATIC_MODE){panel.innerHTML='<div class="muted">Model breakdown isn\'t baked into the static report — use ▦ entry nos. instead.</div>';panel.dataset.loaded='1';return;}
+  panel.innerHTML='<div class="loading">Loading…</div>';
+  const imp=tr.getAttribute('data-name');
+  const d=await api('/api/truck_products',{importer:imp});
+  let h='<table class="subdt"><thead><tr><th>Model / description</th><th>HS8</th><th>Origin</th><th class="num">Units</th><th class="num">Decl.</th><th class="num">Duties</th><th></th></tr></thead><tbody>';
+  d.rows.forEach(p=>{h+=`<tr><td>${esc(p.product)}</td><td>${esc(p.hs8)}</td><td>${esc(p.origin)}</td><td class="num">${fmt.num(p.units)}</td><td class="num">${fmt.num(p.entries)}</td><td class="num">${fmt.phpF(p.duties)}</td><td><span class="elink" data-imp="${esc(imp)}" data-prod="${esc(p.product)}" onclick="showEntriesC({importer:this.dataset.imp,product:this.dataset.prod},this.dataset.imp+' · '+this.dataset.prod)">▦ entry nos</span></td></tr>`;});
+  if(!d.rows.length)h+='<tr><td colspan="7" class="muted">No detail.</td></tr>';
+  panel.innerHTML=h+'</tbody></table>';panel.dataset.loaded='1';
+}
+
+/* ── Brands sub-tab (cars + ALL ≤5t goods vehicles, incl. Lite Ace-likes) ── */
+async function renderBrands(){if(window.STATIC_MODE)return;const el=document.getElementById('car-pane-brand');loading(el);
+  const d=await api('/api/car_brands');
+  const totalUnits=d.total_units||1;
+  el.innerHTML=`<div class="note">Brand-level view — includes passenger cars (HS 8703) AND every ≤5t goods-vehicle subheading (HS 8704.21/.31/.41/.51/.60), so pickups AND light vans/trucks like the Toyota Lite Ace are included here even though the stricter Pickup/Truck split in the other sub-tabs routes some of them to 🚛 Trucks. Powertrain by HS code.</div>
+  <div class="section"><div class="sec-label">Powertrain mix — all brands</div><div class="kpi-grid">
+    ${['Electric','Hybrid','ICE'].map(k=>kpi(k,fmt.num(d.mix[k]||0),((d.mix[k]||0)/totalUnits*100).toFixed(1)+'% of units','')).join('')}
+    ${kpi('Total units',fmt.num(d.total_units),'cars + ≤5t goods vehicles','good')}
+  </div></div>
+  <div class="section"><div class="chart-row cols-2-1">
+    <div class="card"><div class="card-title">By brand — click a row to drill down (pop-out: general → specific); ▦ for entry nos.</div><div class="table-wrap"><table class="dt"><thead><tr><th>#</th><th>Brand</th><th class="num">Units</th><th class="num">Electric</th><th class="num">Hybrid</th><th class="num">ICE</th><th class="num">Declarations</th><th class="num">Duties</th><th></th></tr></thead><tbody>
+      ${d.rows.map((r,i)=>{const bv=escAttr(r.brand);return `<tr class="drill-row" data-brand="${bv}" onclick="brandDrill(this)"><td class="rank">${i+1}</td><td class="name">${esc(r.brand)}</td><td class="num">${fmt.num(r.units)}</td><td class="num">${fmt.num(r.electric)}</td><td class="num">${fmt.num(r.hybrid)}</td><td class="num">${fmt.num(r.ice)}</td><td class="num">${fmt.num(r.entries)}</td><td class="num">${fmt.phpF(r.revenue)}</td><td><span class="elink" onclick="event.stopPropagation();brandEntries(this)">▦</span></td></tr>`;}).join('')}
+    </tbody></table></div></div>
+    <div class="card"><div class="card-title">Units by brand &amp; powertrain</div><div class="ch-wrap tall"><canvas id="ch-brand"></canvas></div></div>
+  </div></div>`;
+  const top=d.rows.slice(0,12);
+  mkChart('ch-brand',{type:'bar',data:{labels:top.map(r=>r.brand),datasets:['Electric','Hybrid','ICE'].map(k=>({label:k,data:top.map(r=>r[k.toLowerCase()]||0),backgroundColor:PTC[k]}))},options:{responsive:true,maintainAspectRatio:false,plugins:{tooltip:{callbacks:{label:c=>' '+c.dataset.label+': '+fmt.num(c.parsed.y)}}},scales:{x:{stacked:true,grid:{display:false},ticks:{maxTicksLimit:12}},y:{stacked:true,ticks:{callback:v=>fmt.num(v)},grid:{color:C.grid}}}}});
+}
+function brandDrill(tr){const brand=tr.dataset.brand;openDrillModal('Brand: '+brand,{brand,domain:'carbrand'},'brand');}
+function brandEntries(el){const brand=el.closest('tr').dataset.brand;entriesFromConsObj({brand,domain:'carbrand'});}
+
+/* ── Motor Vehicles sub-tab (GENERAL DESC = MOTOR VEHICLES + PUBLIC TRANSPORT) ── */
+async function renderMotorVehicles(){if(window.STATIC_MODE)return;const el=document.getElementById('car-pane-motorveh');loading(el);
+  const d=await api('/api/motor_vehicles');const t=d.totals;
+  const pt=d.pubtransport.find(p=>p.class==='Public Transport')||{revenue:0,volume:0,entries:0,units:0};
+  const priv=d.pubtransport.find(p=>p.class==='Private / Other')||{revenue:0,volume:0,entries:0,units:0};
+  const totRev=(pt.revenue+priv.revenue)||1;
+  const impTotal=d.top_importers.reduce((a,r)=>a+r.revenue,0)||1;
+  el.innerHTML=`<div class="note">Scope: GENERAL DESC = <strong>MOTOR VEHICLES</strong> + <strong>PUBLIC TRANSPORT</strong> — the masterlist's own classification (e.g. Toyota HiAce / Nissan Urvan-style vans are tagged PUBLIC TRANSPORT directly, HS 8702). Drill: importer → specific description → goods description.</div>
+  <div class="section"><div class="kpi-grid">
+    ${kpi('Total revenue',fmt.php(t.revenue),fmt.phpF(t.revenue),'')}
+    ${kpi('Declarations',fmt.num(t.entries),'distinct entry nos.','good')}
+    ${kpi('Units',fmt.num(t.units),'','')}
+  </div></div>
+  <div class="section"><div class="card pubtrans-card">
+    <div class="card-title">🚌 Public Transport vs 🚗 Private / Other — share % <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· click a slice (or a stat card) to drill down</span></div>
+    <div class="pubtrans-big">
+      <div class="pubtrans-stat pt" onclick="motorVehDrillByClass('Public Transport')"><div class="pubtrans-emoji">🚌</div><div class="pubtrans-pct">${(pt.revenue/totRev*100).toFixed(1)}%</div><div class="pubtrans-lbl">Public Transport</div><div class="pubtrans-sub">${fmt.num(pt.units)} units · ${fmt.num(pt.entries)} decl.</div></div>
+      <div class="pubtrans-stat priv" onclick="motorVehDrillByClass('Private / Other')"><div class="pubtrans-emoji">🚗</div><div class="pubtrans-pct">${(priv.revenue/totRev*100).toFixed(1)}%</div><div class="pubtrans-lbl">Private / Other</div><div class="pubtrans-sub">${fmt.num(priv.units)} units · ${fmt.num(priv.entries)} decl.</div></div>
+    </div>
+    <div class="pie-wrap"><canvas id="ch-pubtrans"></canvas></div>
+  </div></div>
+  <div class="section"><div class="card"><div class="card-title">Top importers — Motor Vehicles + Public Transport <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· click a row to drill down (pop-out: specific → goods); ▦ for entry nos.</span></div>
+  <div class="table-wrap"><table class="dt"><thead><tr><th>#</th><th>Importer</th><th class="num">Revenue</th><th class="num">Share</th><th class="num">Units</th><th class="num">Declarations</th><th></th></tr></thead><tbody>
+  ${d.top_importers.map((r,i)=>{const nm=escAttr(r.name);const pct=(r.revenue/impTotal*100).toFixed(1)+'%';return `<tr class="drill-row" data-imp="${nm}" onclick="motorVehImpDrill(this)"><td class="rank">${i+1}</td><td class="name">${esc(r.name)}</td><td class="num">${fmt.phpF(r.revenue)}</td><td class="num">${pct}</td><td class="num">${fmt.num(r.units)}</td><td class="num">${fmt.num(r.entries)}</td><td><span class="elink" onclick="event.stopPropagation();motorVehImpEntries(this)">▦</span></td></tr>`;}).join('')}
+  </tbody></table></div></div></div>`;
+  mkChart('ch-pubtrans',{type:'doughnut',plugins:[window.ChartDataLabels].filter(Boolean),
+    data:{labels:['🚌 Public Transport','🚗 Private / Other'],datasets:[{data:[pt.revenue,priv.revenue],backgroundColor:['#f97316','#7c3aed'],borderColor:'#fff',borderWidth:4,hoverOffset:14}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'40%',
+      onClick:(e,els)=>{if(els.length)motorVehDrillByClass(els[0].index===0?'Public Transport':'Private / Other');},
+      plugins:{legend:{position:'bottom',labels:{boxWidth:14,font:{size:12,weight:'700'}}},
+        datalabels:{color:'#fff',font:{weight:'800',size:16},formatter:(v,c)=>{const tt=c.dataset.data.reduce((a,b)=>a+b,0);return tt?(v/tt*100).toFixed(1)+'%':'';}},
+        tooltip:{callbacks:{label:c=>' '+c.label+': '+fmt.phpF(c.parsed)+' ('+(c.parsed/totRev*100).toFixed(1)+'%)'}}}}});
+}
+function motorVehDrillByClass(cls){openDrillModal((cls==='Public Transport'?'🚌 ':'🚗 ')+cls,{domain:'motorveh',pubtransport:cls},'motorVeh');}
+function motorVehImpDrill(tr){const imp=tr.dataset.imp;openDrillModal('Importer: '+imp,{domain:'motorveh',importer:imp},'motorVehImp');}
+function motorVehImpEntries(el){const imp=el.closest('tr').dataset.imp;entriesFromConsObj({domain:'motorveh',importer:imp});}
+
+/* ── Motor Vehicle Parts & Accessories (carve-out — not a motor vehicle itself) ── */
+async function renderMotorVehicleParts(){if(window.STATIC_MODE)return;const el=document.getElementById('car-pane-parts');loading(el);
+  const d=await api('/api/motor_vehicle_parts');const t=d.totals;
+  const impTotal=d.top_importers.reduce((a,r)=>a+r.revenue,0)||1;
+  const goodsTop=d.top_goods.slice(0,8);
+  const goodsRest=d.top_goods.slice(8).reduce((a,r)=>a+r.revenue,0);
+  const goodsData=goodsRest>0?[...goodsTop,{name:'Others',revenue:goodsRest}]:goodsTop;
+  const goodsTotal=goodsData.reduce((a,r)=>a+r.revenue,0)||1;
+  el.innerHTML=`<div class="note">Scope: GENERAL DESC = <strong>MOTOR VEHICLES</strong>, SPECIFIC DESC = <strong>PARTS &amp; ACCESSORIES</strong> — split out from the 🚌 Motor Vehicles sub-tab because parts/components are not a motor vehicle themselves. Drill: importer → goods description.</div>
+  <div class="section"><div class="kpi-grid">
+    ${kpi('Total revenue',fmt.php(t.revenue),fmt.phpF(t.revenue),'')}
+    ${kpi('Declarations',fmt.num(t.entries),'distinct entry nos.','good')}
+    ${kpi('Line items',fmt.num(t.lines),'','')}
+  </div></div>
+  <div class="section"><div class="card pubtrans-card">
+    <div class="card-title">🔧 Top goods descriptions — share % <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· click a slice to drill down</span></div>
+    <div class="pie-wrap"><canvas id="ch-vehparts"></canvas></div>
+  </div></div>
+  <div class="section"><div class="card"><div class="card-title">Top importers — Parts &amp; Accessories <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· click a row to drill down (pop-out: goods description); ▦ for entry nos.</span></div>
+  <div class="table-wrap"><table class="dt"><thead><tr><th>#</th><th>Importer</th><th class="num">Revenue</th><th class="num">Share</th><th class="num">Declarations</th><th></th></tr></thead><tbody>
+  ${d.top_importers.map((r,i)=>{const nm=escAttr(r.name);const pct=(r.revenue/impTotal*100).toFixed(1)+'%';return `<tr class="drill-row" data-imp="${nm}" onclick="vehPartsImpDrill(this)"><td class="rank">${i+1}</td><td class="name">${esc(r.name)}</td><td class="num">${fmt.phpF(r.revenue)}</td><td class="num">${pct}</td><td class="num">${fmt.num(r.entries)}</td><td><span class="elink" onclick="event.stopPropagation();vehPartsImpEntries(this)">▦</span></td></tr>`;}).join('')}
+  </tbody></table></div></div></div>`;
+  mkChart('ch-vehparts',{type:'doughnut',plugins:[window.ChartDataLabels].filter(Boolean),
+    data:{labels:goodsData.map(r=>r.name.length>40?r.name.slice(0,40)+'…':r.name),
+      datasets:[{data:goodsData.map(r=>r.revenue),backgroundColor:['#f97316','#7c3aed','#0ea5e9','#22c55e','#eab308','#ec4899','#14b8a6','#f43f5e','#94a3b8'],borderColor:'#fff',borderWidth:4,hoverOffset:14}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'40%',
+      onClick:(e,els)=>{if(els.length){const r=goodsData[els[0].index];if(r.name!=='Others')showEntriesC({domain:'motorvehparts',product:r.name},'Goods description: '+r.name);}},
+      plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:10,weight:'700'}}},
+        datalabels:{color:'#fff',font:{weight:'800',size:12},formatter:(v,c)=>{const tt=c.dataset.data.reduce((a,b)=>a+b,0);return tt?(v/tt*100).toFixed(1)+'%':'';}},
+        tooltip:{callbacks:{label:c=>' '+c.label+': '+fmt.phpF(c.parsed)+' ('+(c.parsed/goodsTotal*100).toFixed(1)+'%)'}}}}});
+}
+function vehPartsImpDrill(tr){const imp=tr.dataset.imp;openDrillModal('Importer: '+imp,{domain:'motorvehparts',importer:imp},'motorVehParts');}
+function vehPartsImpEntries(el){const imp=el.closest('tr').dataset.imp;entriesFromConsObj({domain:'motorvehparts',importer:imp});}
+
+/* ── Petroleum ── */
+async function rPetro(){const el=document.getElementById('tab-petro');loading(el);const d=await api('/api/petroleum');const t=d.totals;
+  const catTotal=d.by_category.reduce((a,c)=>a+c.mt,0), portTotal=d.by_port.reduce((a,p)=>a+p.mt,0), impTotal=d.top_importers.reduce((a,r)=>a+r.mt,0);
+  el.innerHTML=`<div class="note">Petroleum imports (HS 2710 fuels · 2711 LPG & gases · 3403 lubricants). Volume in metric tons (MT). Categorized by <strong>fuel type (SPECIFIC DESC)</strong> — DIESEL, GASOLINE, LPG, BUNKER FUEL, JET FUEL, KEROSENE, etc. — not the catch-all INDEX2 bucket.</div>
+  <div class="section"><div class="kpi-grid">
+    ${kpi('Total volume',fmt.num(t.mt)+' MT',fmt.num(t.kg)+' kg','oil')}
+    ${kpi('Duties & taxes',fmt.php(t.duties),fmt.phpF(t.duties),'oil')}
+    ${kpi('Shipments (declarations)',fmt.num(t.shipments),'distinct entry nos.','')}
+  </div></div>
+  <div class="section"><div class="chart-row cols-2-1">
+    <div class="card"><div class="card-title">By fuel type — click to drill down (general → importer); ▦ for entry nos.</div><div class="table-wrap"><table class="dt"><thead><tr><th>#</th><th>Fuel type</th><th class="num">MT</th><th class="num">Duties</th><th class="num">Shipments</th><th></th></tr></thead><tbody>
+      ${d.by_category.map((c,i)=>{const cv=escAttr(c.category);return `<tr class="drill-row" data-cat="${cv}" onclick="petroFuelDrill(this)"><td class="rank">${i+1}</td><td>${esc(c.category)}</td><td class="num">${fmt.num(c.mt)}</td><td class="num">${fmt.phpF(c.duties)}</td><td class="num">${fmt.num(c.shipments)}</td><td><span class="elink" onclick="event.stopPropagation();petroFuelEntries(this)">▦</span></td></tr>`;}).join('')}
+    </tbody></table></div></div>
+    <div class="card"><div class="card-title">Volume by fuel type (MT) <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· click to drill down</span></div><div class="ch-wrap tall"><canvas id="ch-pcat"></canvas></div></div>
+  </div></div>
+  <div class="section"><div class="chart-row cols-2-1">
+    <div class="card"><div class="card-title">By port — click to drill down (importer → general → specific → goods); ▦ for entry nos.</div><div class="table-wrap"><table class="dt"><thead><tr><th>#</th><th>Port</th><th class="num">MT</th><th class="num">Duties</th><th class="num">Shipments</th><th></th></tr></thead><tbody>
+    ${d.by_port.map((p,i)=>{const pv=escAttr(p.port);return `<tr class="drill-row" data-port="${pv}" onclick="petroPortDrill(this)"><td class="rank">${i+1}</td><td>${esc(p.port)}</td><td class="num">${fmt.num(p.mt)}</td><td class="num">${fmt.phpF(p.duties)}</td><td class="num">${fmt.num(p.shipments)}</td><td><span class="elink" onclick="event.stopPropagation();petroPortEntries(this)">▦</span></td></tr>`;}).join('')}
+    </tbody></table></div></div>
+    <div class="card"><div class="card-title">Volume by port (MT) <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· click to drill down</span></div><div class="ch-wrap tall"><canvas id="ch-pport"></canvas></div></div>
+  </div></div>
+  <div class="section"><div class="chart-row cols-2-1">
+    <div class="card"><div class="card-title">Top petroleum importers — click for products; ▦ for entry nos.</div><div class="table-wrap"><table class="dt"><thead><tr><th></th><th>#</th><th>Importer</th><th class="num">MT</th><th class="num">Duties</th><th class="num">Shipments</th><th></th></tr></thead><tbody>
+    ${d.top_importers.map((r,i)=>{const nm=escAttr(r.importer);return `<tr class="drill-row" data-name="${nm}" onclick="togglePetroImp(this)"><td><span class="dtoggle">▶</span></td><td class="rank">${i+1}</td><td class="name">${esc(r.importer)}</td><td class="num">${fmt.num(r.mt)}</td><td class="num">${fmt.phpF(r.duties)}</td><td class="num">${fmt.num(r.shipments)}</td><td><span class="elink" onclick="event.stopPropagation();showEntriesPetro('importer','${nm}')">▦</span></td></tr><tr class="sub-row" style="display:none"><td colspan="7"><div class="sub-panel"></div></td></tr>`;}).join('')}
+    </tbody></table></div></div>
+    <div class="card"><div class="card-title">Top importers — share % (MT) <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· click to drill down</span></div><div class="ch-wrap tall"><canvas id="ch-pimp"></canvas></div></div>
+  </div></div>`;
+  donut('ch-pcat',d.by_category.map(c=>({name:c.category,mt:c.mt})),catTotal,(name,isOthers)=>{if(!isOthers)petroFuelDrillByName(name);},'mt',v=>fmt.num(v)+' MT');
+  donut('ch-pport',d.by_port.map(p=>({name:p.port,mt:p.mt})),portTotal,(name,isOthers)=>{if(!isOthers)petroPortDrillByName(name);},'mt',v=>fmt.num(v)+' MT');
+  donut('ch-pimp',d.top_importers.map(r=>({name:r.importer,mt:r.mt})),impTotal,(name,isOthers)=>{if(!isOthers)openDrillModal('Petroleum importer: '+name,{importer:name,domain:'oil'},'importer');},'mt',v=>fmt.num(v)+' MT');
+}
+function petroFuelDrill(tr){petroFuelDrillByName(tr.dataset.cat);}
+function petroFuelDrillByName(cat){openDrillModal('Fuel type: '+cat,{specific:cat,domain:'oil'},'petrofuel');}
+function petroFuelEntries(el){const cat=el.closest('tr').dataset.cat;entriesFromConsObj({specific:cat,domain:'oil'});}
+function petroPortDrill(tr){petroPortDrillByName(tr.dataset.port);}
+function petroPortDrillByName(port){openDrillModal(port+' — Petroleum',{port,domain:'oil'},'petroport');}
+function petroPortEntries(el){const port=el.closest('tr').dataset.port;entriesFromConsObj({port,domain:'oil'});}
+async function togglePetroImp(tr){const sub=tr.nextElementSibling,tog=tr.querySelector('.dtoggle');const open=sub.style.display!=='none';if(open){sub.style.display='none';tog.classList.remove('open');return;}sub.style.display='table-row';tog.classList.add('open');const panel=sub.querySelector('.sub-panel');if(panel.dataset.loaded)return;
+  if(window.STATIC_MODE){panel.innerHTML='<div class="muted">Product breakdown isn\'t baked into the static report — use the importer\'s pop-out drill-down or ▦ entry nos. instead.</div>';panel.dataset.loaded='1';return;}
+  panel.innerHTML='<div class="loading">Loading…</div>';
+  const imp=tr.getAttribute('data-name');
+  const d=await api('/api/petro_products',{importer:imp});
+  let h='<table class="subdt"><thead><tr><th>Fuel type</th><th>Product</th><th>HS8</th><th>Origin</th><th class="num">MT</th><th class="num">Duties</th><th class="num">Shipments</th><th></th></tr></thead><tbody>';
+  d.rows.forEach(p=>{h+=`<tr><td>${esc(p.category)}</td><td>${esc(p.product)}</td><td>${esc(p.hs8)}</td><td>${esc(p.origin)}</td><td class="num">${fmt.num(p.mt)}</td><td class="num">${fmt.phpF(p.duties)}</td><td class="num">${fmt.num(p.shipments)}</td><td><span class="elink" data-imp="${esc(imp)}" data-hs11="${esc(p.product)}" data-hs8="${esc(p.hs8)}" onclick="showEntriesC({importer:this.dataset.imp,hs11:this.dataset.hs11,hs8:this.dataset.hs8},this.dataset.imp+' · '+this.dataset.hs11)">▦ entry nos</span></td></tr>`;});
+  panel.innerHTML=h+'</tbody></table>';panel.dataset.loaded='1';
+}
+async function showEntriesPetro(field,val){openModal('Entry numbers',val);const ex={};ex[field]=val;const d=await api('/api/entries',ex);renderEntries(d);}
+
+/* ── Memo ── */
+async function rMemo(){const el=document.getElementById('tab-memo');loading(el);const d=await api('/api/memo');
+  el.innerHTML='<div class="toolbar"><button class="btn" onclick="dlMemoDocx()">⬇ Generate Word memo (.docx)</button><span class="muted">Follows the official A–F template for the selected period. DBCC targets come from the loaded targets CSV; the C / D.2 / "vs last year" sections need a prior-year file.</span></div><div class="memo-box">'+d.html+'</div>';
+}
+function dlMemoDocx(){if(window.STATIC_MODE){alert('Generating the Word memo requires the live dashboard.');return;}window.location='/api/memo_docx?'+qs();}
+function mdHtml(md){const L=md.split('\n');let o='',inl=false;const il=s=>esc(s).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\*(.+?)\*/g,'<em>$1</em>');
+  for(const ln of L){if(/^# /.test(ln)){if(inl){o+='</ul>';inl=false;}o+='<h1>'+il(ln.slice(2))+'</h1>';}else if(/^## /.test(ln)){if(inl){o+='</ul>';inl=false;}o+='<h2>'+il(ln.slice(3))+'</h2>';}else if(/^\d+\. /.test(ln)||/^- /.test(ln)){if(!inl){o+='<ul>';inl=true;}o+='<li>'+il(ln.replace(/^(\d+\.|-)\s/,''))+'</li>';}else if(ln.trim()){if(inl){o+='</ul>';inl=false;}o+='<p>'+il(ln)+'</p>';}}
+  if(inl)o+='</ul>';return o;}
+function dlMemo(){const b=new Blob([window.__memo],{type:'text/markdown'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='POB_memo_'+state.start+'_'+state.end+'.md';document.body.appendChild(a);a.click();document.body.removeChild(a);}
+
+/* ── Export: render every tab once so the full report has data, not just whatever the user has clicked ── */
+function tick(){return new Promise(r=>setTimeout(r,30));}
+async function renderAllTabs(){
+  const tabs=['overview','collection','oil','importers','commodities','cars','petro','memo'];
+  for(const t of tabs){
+    document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
+    document.getElementById('tab-'+t).classList.add('active');
+    curTab=t;
+    await RENDER[t]();
+    await tick();
+    if(t==='cars'){await renderCarPT();await tick();await renderTrucks();await tick();await renderBrands();await tick();await renderMotorVehicles();await tick();await renderMotorVehicleParts();await tick();}
+  }
+}
+function restoreTab(name){document.querySelectorAll('.tab-pane').forEach(p=>p.classList.toggle('active',p.id==='tab-'+name));document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));curTab=name;}
+
+/* Export 1: print every tab to PDF via the browser's print dialog (charts print natively, no baking needed). */
+async function exportPDF(){
+  const originalTab=curTab;
+  await renderAllTabs();
+  window.print();
+  restoreTab(originalTab);
+}
+
+/* Export 2: a frozen, read-only standalone .html that still drills down and pops out.
+   Charts are baked to images; the period/oil/port filters and the few features that need
+   the live server (changing the period, the Word memo download, a couple of secondary
+   inline-expand tables) are disabled — but pop-out drill-downs and ▦ entry numbers work
+   fully offline, against a copy of the period's raw records baked into the file
+   (see decodeExport()/localApi() above, fed by /api/export_raw). */
+async function exportStaticReport(){
+  const originalTab=curTab, originalCarSub=state.carSub;
+  await renderAllTabs();
+  const raw=await api('/api/export_raw');
+  const imgs={};
+  document.querySelectorAll('canvas').forEach(c=>{if(c.id){try{imgs[c.id]=c.toDataURL('image/png');}catch(e){}}});
+
+  const clone=document.documentElement.cloneNode(true);
+  clone.querySelectorAll('canvas').forEach(c=>{
+    if(c.id&&imgs[c.id]){const img=document.createElement('img');img.src=imgs[c.id];img.style.cssText='width:100%;height:100%;object-fit:contain';c.replaceWith(img);}
+  });
+  // NOTE: Chart.js/datalabels libraries (head) are kept even though charts are now static
+  // images — the app script references the global `Chart` object at top level
+  // (Chart.defaults.font...) and removing the library throws there, which (since it's
+  // a synchronous top-level statement before `let curTab=...`) leaves curTab permanently
+  // unusable (temporal dead zone) and breaks every function that touches it, incl. showTab.
+  // keep the body's app script (drill-downs/modals/etc. all still run), just remove the
+  // boot call so loading the file doesn't immediately re-fetch '/api/summary' and wipe the baked tab.
+  const bodyScripts=clone.querySelectorAll('body script');
+  const mainScript=bodyScripts[bodyScripts.length-1];
+  if(mainScript)mainScript.textContent=mainScript.textContent.replace(/\/\*\s*boot\s*\*\/\s*rOverview\(\);?/,'');
+  clone.querySelectorAll('.save-btn,.header-actions').forEach(el=>el.remove());
+  clone.querySelectorAll('#d-start,#d-end').forEach(el=>el.disabled=true);
+  // static read-only banner, inserted alongside (not replacing) the filter bar so the kept
+  // script's own startup code (which expects #d-start/#presets/#portchips to exist) still runs fine.
+  const banner=document.createElement('div');
+  banner.innerHTML='<div style="background:#fef2f2;border-bottom:2px solid #fecaca;padding:.5rem 1.5rem;font-size:.78rem;color:#991b1b;font-weight:700">'+
+    '📄 STATIC READ-ONLY REPORT — period '+esc(state.start)+' → '+esc(state.end)+
+    (state.oil?' · Oil: '+esc(state.oil):'')+(state.ports.length?' · Ports: '+esc(state.ports.join(', ')):'')+
+    ' · generated '+esc(new Date().toLocaleString())+'. Drill-downs and entry numbers work offline; the period/filters above and the Word-memo download do not.</div>';
+  clone.querySelector('.filterbar').insertAdjacentElement('beforebegin',banner.firstElementChild);
+  clone.querySelectorAll('.tab-pane').forEach(p=>p.classList.toggle('active',p.id==='tab-'+originalTab));
+  clone.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===originalTab));
+  CAR_SUBS.forEach(k=>{const p=clone.querySelector('#car-pane-'+k);if(p)p.style.display=k===originalCarSub?'':'none';});
+
+  const dataScript=document.createElement('script');
+  dataScript.textContent='window.STATIC_MODE=true;window.EXPORT_RECORDS=decodeExport('+JSON.stringify(raw)+');';
+  clone.querySelector('body').appendChild(dataScript);
+
+  const html='<!DOCTYPE html>\n'+clone.outerHTML;
+  const b=new Blob([html],{type:'text/html'});const a=document.createElement('a');a.href=URL.createObjectURL(b);
+  a.download='POB_static_report_'+state.start+'_'+state.end+'.html';document.body.appendChild(a);a.click();document.body.removeChild(a);
+  restoreTab(originalTab);
+}
+
+/* boot */
+rOverview();
+</script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>POB Collection &amp; Import Analytics — Dashboard Generator</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:linear-gradient(135deg,#0f2d54 0%,#1a4a8a 60%,#0d3068 100%);
+  min-height:100vh;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;padding:2rem}
+.card{background:#fff;border-radius:20px;box-shadow:0 24px 64px rgba(0,0,0,.35);
+  width:100%;max-width:680px;overflow:hidden}
+.card-header{background:linear-gradient(135deg,#0f2d54 0%,#1a4a8a 100%);
+  padding:2rem 2.5rem;display:flex;align-items:center;gap:1.25rem}
+.header-seal{width:56px;height:56px;flex-shrink:0}
+.header-text h1{color:#fff;font-size:1.35rem;font-weight:700;letter-spacing:.02em}
+.header-text p{color:rgba(255,255,255,.72);font-size:.85rem;margin-top:2px}
+.header-badge{margin-left:auto;background:rgba(255,255,255,.15);
+  color:#fff;font-size:.75rem;font-weight:600;padding:4px 12px;
+  border-radius:20px;white-space:nowrap}
+.card-body{padding:2rem 2.5rem 2.5rem}
+h2{font-size:1.05rem;color:#0f2d54;font-weight:600;margin-bottom:.35rem}
+.sub{font-size:.82rem;color:#64748b;margin-bottom:1.5rem;line-height:1.5}
+.file-section{margin-bottom:1.1rem}
+.file-label{display:flex;align-items:center;gap:.5rem;
+  font-size:.8rem;font-weight:600;color:#374151;margin-bottom:.5rem}
+.badge-req{background:#fee2e2;color:#991b1b;font-size:.65rem;
+  padding:2px 7px;border-radius:10px;font-weight:700}
+.badge-opt{background:#dbeafe;color:#1e40af;font-size:.65rem;
+  padding:2px 7px;border-radius:10px;font-weight:700}
+.drop-zone{border:2px dashed #cbd5e1;border-radius:12px;
+  padding:1.25rem;text-align:center;cursor:pointer;
+  transition:all .2s;position:relative;background:#f8fafc}
+.drop-zone:hover,.drop-zone.drag-over{border-color:#3b82f6;background:#eff6ff}
+.drop-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.drop-icon{font-size:1.8rem;margin-bottom:.35rem}
+.drop-text{font-size:.85rem;color:#64748b}
+.drop-text strong{color:#1d4ed8;font-weight:600}
+.drop-hint{font-size:.74rem;color:#94a3b8;margin-top:.2rem}
+.drop-name{font-size:.82rem;color:#065f46;font-weight:600;margin-top:.45rem;display:none}
+.field-row{display:flex;gap:1rem;align-items:flex-end;margin-bottom:1.1rem}
+.field-row label{font-size:.78rem;font-weight:600;color:#374151;display:block;margin-bottom:.35rem}
+select{padding:.55rem .8rem;border:1px solid #cbd5e1;border-radius:8px;
+  font-size:.85rem;color:#1e293b;background:#fff;width:100%;outline:none}
+select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+.divider{display:flex;align-items:center;gap:.75rem;margin:1.25rem 0}
+.divider-line{flex:1;height:1px;background:#e2e8f0}
+.divider-text{font-size:.75rem;color:#94a3b8;white-space:nowrap}
+.btn-submit{width:100%;padding:1rem;background:linear-gradient(135deg,#0f2d54,#1a4a8a);
+  color:#fff;border:none;border-radius:12px;font-size:1rem;font-weight:600;
+  cursor:pointer;transition:all .2s;display:flex;align-items:center;
+  justify-content:center;gap:.5rem;letter-spacing:.03em}
+.btn-submit:hover{background:linear-gradient(135deg,#0a1f3c,#0f2d54);
+  box-shadow:0 4px 16px rgba(15,45,84,.4);transform:translateY(-1px)}
+.btn-submit:disabled{opacity:.6;cursor:not-allowed;transform:none}
+.spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,.4);
+  border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.info-row{display:flex;gap:1rem;margin-top:1.25rem}
+.info-item{flex:1;background:#f8fafc;border-radius:8px;padding:.75rem 1rem;
+  font-size:.76rem;color:#64748b;border-left:3px solid #3b82f6}
+.info-item strong{color:#0f2d54;display:block;margin-bottom:2px;font-size:.8rem}
+footer{color:rgba(255,255,255,.5);font-size:.72rem;margin-top:1.5rem;text-align:center}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="card-header">
+    <svg class="header-seal" viewBox="0 0 56 56" fill="none">
+      <circle cx="28" cy="28" r="27" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/>
+      <circle cx="28" cy="28" r="20" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+      <path d="M28 10 L30.5 22 L43 17 L35 27.5 L46 33 L33 33 L33 46 L28 35 L23 46 L23 33 L10 33 L21 27.5 L13 17 L25.5 22 Z" fill="rgba(255,215,0,0.8)"/>
+    </svg>
+    <div class="header-text">
+      <h1>Assessment Division</h1>
+      <p>Port of Batangas &nbsp;·&nbsp; Bureau of Customs</p>
+    </div>
+    <div class="header-badge">Dashboard Generator</div>
+  </div>
+  <div class="card-body">
+    <h2>Generate Interactive Collection Dashboard</h2>
+    <p class="sub">Upload the raw BOC masterlist (.xlsx) and instantly generate a self-contained interactive HTML dashboard — daily collection vs DBCC target, oil/non-oil split, top importers &amp; commodities, car imports with powertrain mix, petroleum drill-downs, and the auto A–F memo. No server required to view.</p>
+
+    <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
+      <div class="file-section">
+        <div class="file-label">Masterlist (current) <span class="badge-req">REQUIRED</span></div>
+        <div class="drop-zone" id="drop1">
+          <input type="file" name="file1" id="file1" accept=".xlsx" required onchange="onFileSelect(this,'drop1','name1')">
+          <div class="drop-icon">📊</div>
+          <div class="drop-text"><strong>Click to browse</strong> or drag &amp; drop</div>
+          <div class="drop-hint">BOC consumption masterlist .xlsx · Sheet1 · up to 200 MB</div>
+          <div class="drop-name" id="name1"></div>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div style="flex:1">
+          <label for="date_basis">Date basis</label>
+          <select name="date_basis" id="date_basis">
+            <option value="COLLECTIONDATE">Collection date (default)</option>
+            <option value="ASSESSMENTDATE">Assessment date</option>
+            <option value="REGISTRYDATE">Registry date</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="divider"><div class="divider-line"></div><div class="divider-text">optional inputs</div><div class="divider-line"></div></div>
+
+      <div class="file-section">
+        <div class="file-label">Prior-year masterlist <span class="badge-opt">OPTIONAL · enables YoY</span></div>
+        <div class="drop-zone" id="drop2">
+          <input type="file" name="file2" id="file2" accept=".xlsx" onchange="onFileSelect(this,'drop2','name2')">
+          <div class="drop-icon">📈</div>
+          <div class="drop-text"><strong>Click to browse</strong> or drag &amp; drop</div>
+          <div class="drop-hint">Previous-year masterlist for year-on-year comparison</div>
+          <div class="drop-name" id="name2"></div>
+        </div>
+      </div>
+
+      <div class="file-section">
+        <div class="file-label">DBCC targets CSV <span class="badge-opt">OPTIONAL</span></div>
+        <div class="drop-zone" id="drop3">
+          <input type="file" name="targets" id="targets" accept=".csv" onchange="onFileSelect(this,'drop3','name3')">
+          <div class="drop-icon">🎯</div>
+          <div class="drop-text"><strong>Click to browse</strong> or drag &amp; drop</div>
+          <div class="drop-hint">columns: year, month, monthly_target_php · defaults to bundled targets.csv</div>
+          <div class="drop-name" id="name3"></div>
+        </div>
+      </div>
+
+      <div style="margin-top:1.5rem">
+        <button type="submit" class="btn-submit" id="submitBtn">
+          <div class="spinner" id="spinner"></div>
+          <span id="btnText">⚡ Generate Dashboard</span>
+        </button>
+      </div>
+    </form>
+
+    <div class="info-row">
+      <div class="info-item"><strong>Metrics</strong> Revenue = TOTALASSESSMENT (PHP) · Volume = GROSSMASS (kg) · Importer = CONSIGNEE (normalized)</div>
+      <div class="info-item"><strong>Output</strong> Self-contained .html — open offline in any browser. Aggregates the full file span.</div>
+    </div>
+  </div>
+</div>
+<footer>Port of Batangas Assessment Division</footer>
+
+<script>
+function onFileSelect(input, dropId, nameId){
+  const nameEl=document.getElementById(nameId), drop=document.getElementById(dropId);
+  if(input.files.length){
+    nameEl.textContent='✓ '+input.files[0].name; nameEl.style.display='block';
+    drop.style.borderColor='#059669'; drop.style.background='#f0fdf4';
+  }
+}
+document.querySelectorAll('.drop-zone').forEach(zone=>{
+  zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('drag-over');});
+  zone.addEventListener('dragleave',()=>zone.classList.remove('drag-over'));
+  zone.addEventListener('drop',()=>zone.classList.remove('drag-over'));
+});
+document.getElementById('uploadForm').addEventListener('submit',function(){
+  document.getElementById('submitBtn').disabled=true;
+  document.getElementById('spinner').style.display='block';
+  document.getElementById('btnText').textContent='Parsing masterlist — this can take 1–2 minutes…';
+});
+</script>
+</body>
+</html>
