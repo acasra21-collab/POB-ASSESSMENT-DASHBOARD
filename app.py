@@ -18,6 +18,7 @@ Run:
 import base64
 import bisect
 import csv
+import hmac
 import io
 import json
 import os
@@ -33,6 +34,22 @@ import memo_builder
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024
+
+# ── HTTP Basic Auth (whole app is gated — repo is public, so credentials are
+# read from env vars on the host, falling back to the agreed defaults) ──────
+AUTH_USER = os.environ.get("DASH_USER", "admin")
+AUTH_PASS = os.environ.get("DASH_PASS", "Admin@5050")
+
+
+@app.before_request
+def _require_login():
+    auth = request.authorization
+    ok = (auth and hmac.compare_digest(auth.username or "", AUTH_USER)
+          and hmac.compare_digest(auth.password or "", AUTH_PASS))
+    if not ok:
+        return make_response(
+            "Login required", 401,
+            {"WWW-Authenticate": 'Basic realm="POB Assessment Dashboard"'})
 
 # ── Inlined Chart.js (for the shell) ─────────────────────────────────────────
 _SCRIPT_CACHE = {}
