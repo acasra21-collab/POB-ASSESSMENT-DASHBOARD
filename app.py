@@ -131,73 +131,117 @@ def _sb_get_meta():
 
 
 def _pack_ds(ds):
-    """Serialize STATE["ds"] to gzip-compressed JSON (typically 5–15 MB, well under 50 MB)."""
+    """Serialize STATE["ds"] to gzip-compressed JSON (typically 5–15 MB, well under 50 MB).
+    Streams records one-by-one into the gzip compressor to avoid duplicating the full
+    record list in memory — peak overhead is one record at a time, not the whole set."""
     def ser_rec(r):
         row = list(r)
-        row[COMPS] = list(r[COMPS])  # tuple → list for JSON
+        row[COMPS] = list(r[COMPS])
         return row
-
-    prior_recs = None
-    if ds.get("prior"):
-        prior_recs = [ser_rec(r) for r in ds["prior"]["records"]]
 
     targets_serial = {f"{y},{m}": v for (y, m), v in ds["targets"].items()}
 
-    payload = {
-        "v": 1,
-        "file1": ds["file1"],
-        "prior_name": ds["prior_name"],
-        "date_basis": ds["date_basis"],
-        "dmin": ds["dmin"].isoformat(),
-        "dmax": ds["dmax"].isoformat(),
-        "ports": ds["ports"],
-        "buckets": ds["buckets"],
-        "undated": ds["undated"],
-        "targets": targets_serial,
-        "records": [ser_rec(r) for r in ds["records"]],
-        "prior_records": prior_recs,
-    }
-    raw = json.dumps(payload, separators=(',', ':')).encode()
-    compressed = gzip.compress(raw, compresslevel=6)
-    print(f"[supabase] snapshot: {len(raw)/1e6:.1f} MB → {len(compressed)/1e6:.1f} MB compressed",
-          flush=True)
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=6) as gz:
+        # Header fields
+        header = {
+            "v": 1,
+            "file1": ds["file1"],
+            "prior_name": ds["prior_name"],
+            "date_basis": ds["date_basis"],
+            "dmin": ds["dmin"].isoformat(),
+            "dmax": ds["dmax"].isoformat(),
+            "ports": ds["ports"],
+            "buckets": ds["buckets"],
+            "undated": ds["undated"],
+            "targets": targets_serial,
+        }
+        gz.write(json.dumps(header, separators=(',', ':')).encode())
+        gz.write(b'\n')
+
+        # Records streamed one line each — no full-list copy in memory
+        gz.write(b'[\n')
+        for i, r in enumerate(ds["records"]):
+            line = json.dumps(ser_rec(r), separators=(',', ':')).encode()
+            gz.write((b',' if i else b'') + line + b'\n')
+        gz.write(b']\n')
+
+        # Optional prior records
+        prior_recs = ds.get("prior") and ds["prior"]["records"]
+        if prior_recs:
+            gz.write(b'[\n')
+            for i, r in enumerate(prior_recs):
+                line = json.dumps(ser_rec(r), separators=(',', ':')).encode()
+                gz.write((b',' if i else b'') + line + b'\n')
+            gz.write(b']\n')
+        else:
+            gz.write(b'null\n')
+
+    compressed = buf.getvalue()
+    print(f"[supabase] snapshot: {len(compressed)/1e6:.1f} MB compressed", flush=True)
     return compressed
 
 
 def _unpack_ds(data):
     """Decompress and deserialize a snapshot blob back to a STATE["ds"] dict."""
-    payload = json.loads(gzip.decompress(data).decode())
-
     def de_rec(row):
         row[COMPS] = tuple(row[COMPS])
         return tuple(row)
 
-    recs = [de_rec(r) for r in payload["records"]]
+    lines = gzip.decompress(data).split(b'\n')
+    # Line 0: header JSON; line 1: start of records array '['; lines 2..N-3: record rows;
+    # line N-2: ']'; line N-1: prior block ('null' or '[' … ']')
+    header = json.loads(lines[0])
+
+    # Collect records lines between the outer '[' and ']'
+    recs_lines, prior_lines = [], []
+    in_prior = False
+    for line in lines[1:]:
+        s = line.strip()
+        if not s or s == b'[':
+            if s == b'[' and recs_lines:
+                in_prior = True
+            continue
+        if s == b']':
+            continue
+        if s == b'null':
+            break
+        target = prior_lines if in_prior else recs_lines
+        target.append(s.lstrip(b','))
+
+    def parse_block(raw_lines):
+        result = []
+        for ln in raw_lines:
+            if ln:
+                result.append(de_rec(json.loads(ln)))
+        return result
+
+    recs = parse_block(recs_lines)
     ords = [r[ORD] for r in recs]
 
     targets = {}
-    for k, v in payload["targets"].items():
+    for k, v in header["targets"].items():
         y, m = k.split(',')
         targets[(int(y), int(m))] = v
 
     prior = None
-    if payload.get("prior_records"):
-        precs = [de_rec(r) for r in payload["prior_records"]]
+    if prior_lines:
+        precs = parse_block(prior_lines)
         prior = {"records": precs, "ords": [r[ORD] for r in precs]}
 
     return {
         "records": recs,
         "ords": ords,
-        "dmin": date.fromisoformat(payload["dmin"]),
-        "dmax": date.fromisoformat(payload["dmax"]),
-        "ports": payload["ports"],
-        "buckets": payload["buckets"],
+        "dmin": date.fromisoformat(header["dmin"]),
+        "dmax": date.fromisoformat(header["dmax"]),
+        "ports": header["ports"],
+        "buckets": header["buckets"],
         "targets": targets,
-        "date_basis": payload["date_basis"],
-        "file1": payload["file1"],
-        "undated": payload["undated"],
+        "date_basis": header["date_basis"],
+        "file1": header["file1"],
+        "undated": header["undated"],
         "prior": prior,
-        "prior_name": payload["prior_name"],
+        "prior_name": header["prior_name"],
     }
 
 
