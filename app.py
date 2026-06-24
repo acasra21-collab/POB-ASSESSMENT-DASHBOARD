@@ -1513,6 +1513,19 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/replace")
+def replace():
+    """Clear in-memory data and reset the auto-load flag so the user can
+    upload a new masterlist. The next upload will overwrite Supabase too."""
+    global _SB_AUTOLOAD_DONE
+    STATE["ds"] = None
+    _set_job(status="idle", progress=0, total=0, stage="", error=None)
+    with _SB_AUTOLOAD_LOCK:
+        _SB_AUTOLOAD_DONE = False
+    from flask import redirect
+    return redirect("/")
+
+
 def _run_upload_job(f1_bytes, f1_name, f2_bytes, f2_name, targets_bytes, date_basis,
                     _save_to_sb=True):
     try:

@@ -146,6 +146,7 @@ input[type=date]{padding:.35rem .5rem;border:1px solid #cbd5e1;border-radius:7px
   <div class="header-actions">
     <button class="save-btn" onclick="exportPDF()" title="Print / save every tab as a PDF">🖨️ Export PDF</button>
     <button class="save-btn" onclick="exportStaticReport()" title="Save a frozen, read-only HTML copy — filters and drill-downs disabled">📄 Static report</button>
+    <button class="save-btn" onclick="if(confirm('Replace the current masterlist? This will clear the dashboard and open the upload page.'))window.location='/replace'" title="Upload a new or updated masterlist">🔄 Replace file</button>
   </div>
 </div></header>
 
