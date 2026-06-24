@@ -163,6 +163,7 @@ input[type=date]{padding:.35rem .5rem;border:1px solid #cbd5e1;border-radius:7px
   <button class="tab-btn" data-tab="oil" onclick="showTab('oil')">Oil / Non-oil</button>
   <button class="tab-btn" data-tab="importers" onclick="showTab('importers')">Importers</button>
   <button class="tab-btn" data-tab="commodities" onclick="showTab('commodities')">Commodities</button>
+  <button class="tab-btn" data-tab="sectors" onclick="showTab('sectors')">📊 Sectors</button>
   <button class="tab-btn" data-tab="cars" onclick="showTab('cars')">🚗 Car Imports</button>
   <button class="tab-btn" data-tab="petro" onclick="showTab('petro')">⛽ Petroleum</button>
   <button class="tab-btn" data-tab="memo" onclick="showTab('memo')">📝 Memo</button>
@@ -174,6 +175,7 @@ input[type=date]{padding:.35rem .5rem;border:1px solid #cbd5e1;border-radius:7px
   <div class="tab-pane" id="tab-oil"></div>
   <div class="tab-pane" id="tab-importers"></div>
   <div class="tab-pane" id="tab-commodities"></div>
+  <div class="tab-pane" id="tab-sectors"></div>
   <div class="tab-pane" id="tab-cars"></div>
   <div class="tab-pane" id="tab-petro"></div>
   <div class="tab-pane" id="tab-memo"></div>
@@ -296,7 +298,7 @@ function loading(el){el.innerHTML='<div class="loading">Loading…</div>';}
 /* tabs */
 let curTab='overview';
 function showTab(name){curTab=name;document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));document.getElementById('tab-'+name).classList.add('active');if(!window.STATIC_MODE)render(name);}
-const RENDER={overview:rOverview,collection:rCollection,oil:rOil,importers:rImporters,commodities:rCommodities,cars:rCars,petro:rPetro,memo:rMemo};
+const RENDER={overview:rOverview,collection:rCollection,oil:rOil,importers:rImporters,commodities:rCommodities,sectors:rSectors,cars:rCars,petro:rPetro,memo:rMemo};
 function render(name){(RENDER[name]||(()=>{}))();}
 
 /* ── Overview ── */
@@ -517,6 +519,45 @@ async function rCommodities(){if(window.STATIC_MODE)return;const el=document.get
     ${d.rows.map((r,i)=>{const nm=escAttr(r.name);const cj=escAttr(JSON.stringify(isGd?{general:r.name}:{commodity:r.name}));const base=isGd?'{general:this.dataset.name}':'{commodity:this.dataset.name}';return `<tr class="drill-row" data-name="${nm}" onclick="openDrillModal('${label}'+this.dataset.name,${base},'${chain}')"><td class="rank">${i+1}</td><td class="name">${esc(r.name)}${r.new?' <span class="tag-new">NEW</span>':''}</td><td class="num">${fmt.phpF(r.revenue)}</td><td class="num">${fmt.pct(r.rev_mom)}</td><td class="num">${fmt.pct(r.rev_yoy)}</td><td class="num">${fmt.num(r.volume)}</td><td class="num">${fmt.num(r.entries)}</td><td><span class="elink" data-cons="${cj}" onclick="event.stopPropagation();entriesFromCons(this)">▦</span></td></tr>`;}).join('')}
     </tbody></table></div></div></div>`;
   donut('ch-gd',dg.rows.slice(0,12),gdTotal,(name,isOthers)=>{if(!isOthers)openDrillModal('General: '+name,{general:name},'general');});
+}
+
+/* ── Sectors (INDEX2 full breakdown) ── */
+async function rSectors(){
+  if(window.STATIC_MODE)return;
+  const el=document.getElementById('tab-sectors');loading(el);
+  const d=await api('/api/sectors');
+  const t=d.totals;const total=t.revenue||1;
+  el.innerHTML=`<div class="note">All INDEX2 commodity sectors as classified in the masterlist. Click any sector row to drill down: INDEX2 → General description → Specific description → Importer → Goods.</div>
+  <div class="section"><div class="kpi-grid">
+    ${kpi('Total revenue',fmt.php(t.revenue),fmt.phpF(t.revenue),'')}
+    ${kpi('Declarations',fmt.num(t.entries),'distinct entry nos.','good')}
+    ${kpi('Volume',fmt.kg(t.volume),'','')}
+    ${kpi('Sectors',fmt.num(d.sectors.length),'INDEX2 categories','')}
+  </div></div>
+  <div class="section"><div class="chart-row cols-2-1">
+    <div class="card"><div class="card-title">All sectors — click a row to drill down (pop-out); ▦ for entry nos.</div>
+    <div class="table-wrap"><table class="dt"><thead><tr>
+      <th>#</th><th>Sector (INDEX2)</th><th class="num">Revenue</th><th class="num">Share %</th><th class="num">Volume</th><th class="num">Declarations</th><th></th>
+    </tr></thead><tbody>
+    ${d.sectors.map((s,i)=>{
+      const sv=escAttr(s.name);
+      const cj=escAttr(JSON.stringify({commodity:s.name}));
+      return `<tr class="drill-row" data-name="${sv}" onclick="openDrillModal('Sector: '+this.dataset.name,{commodity:this.dataset.name},'commodity')">
+        <td class="rank">${i+1}</td>
+        <td class="name">${esc(s.name)}</td>
+        <td class="num">${fmt.phpF(s.revenue)}</td>
+        <td class="num">${s.share.toFixed(1)}%</td>
+        <td class="num">${fmt.num(s.volume)}</td>
+        <td class="num">${fmt.num(s.entries)}</td>
+        <td><span class="elink" data-cons="${cj}" onclick="event.stopPropagation();entriesFromCons(this)">▦</span></td>
+      </tr>`;}).join('')}
+    </tbody></table></div></div>
+    <div class="card"><div class="card-title">Revenue share by sector <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· click to drill down</span></div><div class="ch-wrap tall"><canvas id="ch-sectors"></canvas></div></div>
+  </div></div>`;
+  donut('ch-sectors',d.sectors.slice(0,12),total,(name,isOthers)=>{
+    if(isOthers)return;
+    openDrillModal('Sector: '+name,{commodity:name},'commodity');
+  });
 }
 
 /* ── Cars ── */
@@ -761,7 +802,7 @@ function dlMemo(){const b=new Blob([window.__memo],{type:'text/markdown'});const
 /* ── Export: render every tab once so the full report has data, not just whatever the user has clicked ── */
 function tick(){return new Promise(r=>setTimeout(r,30));}
 async function renderAllTabs(){
-  const tabs=['overview','collection','oil','importers','commodities','cars','petro','memo'];
+  const tabs=['overview','collection','oil','importers','commodities','sectors','cars','petro','memo'];
   for(const t of tabs){
     document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
     document.getElementById('tab-'+t).classList.add('active');

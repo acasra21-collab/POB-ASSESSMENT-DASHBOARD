@@ -1068,6 +1068,24 @@ def api_motor_vehicle_parts():
     return jsonify(totals=t, top_importers=top_importers, top_goods=top_goods)
 
 
+# ── Commodity Sectors (INDEX2 full breakdown) ─────────────────────────────────
+
+@app.route("/api/sectors")
+def api_sectors():
+    ds = _ds_or_400()
+    if not ds:
+        return jsonify(error="no data"), 400
+    sd, ed, so, eo = _range(ds)
+    f = _filt()
+    slc = _slice(ds, so, eo)
+    t = totals(slc, f)
+    sectors = grp_list(slc, f, I2, None)
+    total_rev = t["revenue"] or 1
+    for s in sectors:
+        s["share"] = round(s["revenue"] / total_rev * 100, 1)
+    return jsonify(totals=t, sectors=sectors)
+
+
 # ── Petroleum ────────────────────────────────────────────────────────────────
 
 @app.route("/api/petroleum")
