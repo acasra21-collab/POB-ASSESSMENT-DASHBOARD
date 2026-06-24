@@ -52,6 +52,143 @@ def _require_login():
             "Login required", 401,
             {"WWW-Authenticate": 'Basic realm="POB Assessment Dashboard"'})
 
+# ── Supabase Storage — persist uploaded files across cold starts ──────────────
+# Set SUPABASE_URL and SUPABASE_KEY (service-role key) as Render env vars.
+# SUPABASE_BUCKET defaults to "masterlist". If vars are unset the app works
+# normally, just without cross-restart persistence.
+_SB_URL    = os.environ.get("SUPABASE_URL", "").rstrip("/")
+_SB_KEY    = os.environ.get("SUPABASE_KEY", "")
+_SB_BUCKET = os.environ.get("SUPABASE_BUCKET", "masterlist")
+
+_SB_F1   = "files/masterlist.xlsx"
+_SB_F2   = "files/prior_year.xlsx"
+_SB_TGT  = "files/targets.csv"
+_SB_META = "meta/upload_meta.json"
+
+_SB_AUTOLOAD_DONE = False
+_SB_AUTOLOAD_LOCK = threading.Lock()
+
+
+def _sb_ok():
+    return bool(_SB_URL and _SB_KEY)
+
+
+def _sb_upload(key, data, ctype="application/octet-stream"):
+    url = f"{_SB_URL}/storage/v1/object/{_SB_BUCKET}/{key}"
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Authorization", f"Bearer {_SB_KEY}")
+    req.add_header("Content-Type", ctype)
+    req.add_header("x-upsert", "true")
+    try:
+        with urllib.request.urlopen(req, timeout=180):
+            pass
+        print(f"[supabase] saved {key} ({len(data)/1e6:.1f} MB)", flush=True)
+    except Exception as e:
+        print(f"[supabase] upload {key} failed: {e}", flush=True)
+
+
+def _sb_download(key, on_progress=None):
+    """Download from Supabase Storage. Returns bytes or None if missing."""
+    url = f"{_SB_URL}/storage/v1/object/{_SB_BUCKET}/{key}"
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("Authorization", f"Bearer {_SB_KEY}")
+    try:
+        with urllib.request.urlopen(req, timeout=180) as r:
+            total = int(r.headers.get("Content-Length") or 0)
+            buf, done = [], 0
+            while True:
+                chunk = r.read(131072)  # 128 KB chunks
+                if not chunk:
+                    break
+                buf.append(chunk)
+                done += len(chunk)
+                if on_progress:
+                    on_progress(done, total)
+            return b"".join(buf)
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            print(f"[supabase] download {key} HTTP {e.code}", flush=True)
+        return None
+    except Exception as e:
+        print(f"[supabase] download {key} failed: {e}", flush=True)
+        return None
+
+
+def _sb_put_meta(d):
+    _sb_upload(_SB_META, json.dumps(d).encode(), "application/json")
+
+
+def _sb_get_meta():
+    data = _sb_download(_SB_META)
+    if not data:
+        return None
+    try:
+        return json.loads(data.decode())
+    except Exception:
+        return None
+
+
+def _do_load_from_supabase(meta):
+    """Background thread: download files from Supabase and parse them."""
+    try:
+        f1_name = meta.get("file1", "masterlist.xlsx")
+
+        def dl_progress(done, total):
+            mb = done / 1e6
+            tot_mb = total / 1e6 if total else 0
+            stage = (f"Downloading {f1_name} from cloud… {mb:.0f}/{tot_mb:.0f} MB"
+                     if tot_mb else f"Downloading {f1_name}… {mb:.0f} MB")
+            _set_job(progress=done, total=total or done, stage=stage)
+
+        _set_job(stage=f"Downloading {f1_name} from cloud…", progress=0, total=0)
+        f1_bytes = _sb_download(_SB_F1, on_progress=dl_progress)
+        if not f1_bytes:
+            _set_job(status="idle", stage="", progress=0, total=0)
+            return
+
+        f2_bytes = None
+        if meta.get("has_prior"):
+            _set_job(stage="Downloading prior-year file from cloud…", progress=0, total=0)
+            f2_bytes = _sb_download(_SB_F2)
+
+        targets_bytes = None
+        if meta.get("has_targets"):
+            targets_bytes = _sb_download(_SB_TGT)
+
+        # Reset progress for the parse phase
+        _set_job(stage="Parsing masterlist…", progress=0, total=0)
+        _run_upload_job(f1_bytes, f1_name,
+                        f2_bytes, meta.get("file2"),
+                        targets_bytes, meta.get("date_basis", "COLLECTIONDATE"),
+                        _save_to_sb=False)   # already stored — don't re-upload
+    except Exception:
+        _set_job(status="error", error=traceback.format_exc())
+
+
+def _try_autoload():
+    """Called from / when STATE[ds] is None and job is idle.
+    Checks Supabase once per process lifetime; starts background load if a
+    stored masterlist is found. Returns True if a background load was started."""
+    global _SB_AUTOLOAD_DONE
+    if not _sb_ok():
+        return False
+    with _SB_AUTOLOAD_LOCK:
+        if _SB_AUTOLOAD_DONE:
+            return False
+        _SB_AUTOLOAD_DONE = True
+    try:
+        meta = _sb_get_meta()
+    except Exception:
+        return False
+    if not meta:
+        return False
+    print("[supabase] stored masterlist found — auto-reloading", flush=True)
+    _set_job(status="parsing", progress=0, total=0,
+             stage="Auto-reloading from cloud storage…", error=None)
+    threading.Thread(target=_do_load_from_supabase, args=(meta,), daemon=True).start()
+    return True
+
+
 # ── Inlined Chart.js (for the shell) ─────────────────────────────────────────
 _SCRIPT_CACHE = {}
 _CDN_SCRIPTS = [
@@ -1367,10 +1504,17 @@ def _render_dashboard():
 def index():
     if STATE["ds"] is not None:
         return _render_dashboard()
+    job = _get_job()
+    if job["status"] == "parsing":
+        return render_template("uploading.html")
+    # First visit after a cold start: check Supabase for a stored masterlist
+    if _try_autoload():
+        return render_template("uploading.html")
     return render_template("index.html")
 
 
-def _run_upload_job(f1_bytes, f1_name, f2_bytes, f2_name, targets_bytes, date_basis):
+def _run_upload_job(f1_bytes, f1_name, f2_bytes, f2_name, targets_bytes, date_basis,
+                    _save_to_sb=True):
     try:
         def progress(i, total):
             _set_job(progress=i, total=total)
@@ -1399,6 +1543,22 @@ def _run_upload_job(f1_bytes, f1_name, f2_bytes, f2_name, targets_bytes, date_ba
                        "date_basis": date_basis, "file1": f1_name,
                        "undated": undated, "prior": prior, "prior_name": f2_name}
         _set_job(status="done", progress=len(recs), total=len(recs), stage="")
+
+        # Persist to Supabase Storage so the next cold start can auto-reload
+        if _save_to_sb and _sb_ok():
+            _set_job(stage="Saving to cloud storage…")
+            _sb_upload(_SB_F1, f1_bytes,
+                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            if f2_bytes:
+                _sb_upload(_SB_F2, f2_bytes,
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            if targets_bytes:
+                _sb_upload(_SB_TGT, targets_bytes, "text/csv")
+            _sb_put_meta({"file1": f1_name, "file2": f2_name,
+                          "date_basis": date_basis,
+                          "has_prior": bool(f2_bytes),
+                          "has_targets": bool(targets_bytes)})
+            _set_job(stage="")
     except Exception:
         _set_job(status="error", error=traceback.format_exc())
 
