@@ -431,6 +431,14 @@ def build_docx(ctx):
     if sp is not None:
         body.remove(sp)
         body.append(sp)
+        # Fix zero top margin — the template has w:top="0" which causes body text
+        # to overlap the letterhead header image (1.76 inches tall, ~2530 DXA).
+        # Enforce at least 1.8 inches (2592 DXA) to clear the header.
+        pgmar = sp.find(qn('w:pgMar'))
+        if pgmar is not None:
+            top = int(pgmar.get(qn('w:top'), '0'))
+            if top < 2592:
+                pgmar.set(qn('w:top'), '2592')
 
     buf = io.BytesIO()
     doc.save(buf)
