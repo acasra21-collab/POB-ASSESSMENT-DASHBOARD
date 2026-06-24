@@ -45,6 +45,8 @@ AUTH_PASS = os.environ.get("DASH_PASS", "Admin@5050")
 
 @app.before_request
 def _require_login():
+    if request.path in ('/upload_status', '/healthz'):
+        return  # public diagnostic endpoints
     auth = request.authorization
     ok = (auth and hmac.compare_digest(auth.username or "", AUTH_USER)
           and hmac.compare_digest(auth.password or "", AUTH_PASS))
