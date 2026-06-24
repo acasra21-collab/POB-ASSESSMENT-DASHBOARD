@@ -15,37 +15,74 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 1.5rem}
 @keyframes spin{to{transform:rotate(360deg)}}
 h1{font-size:1.1rem;color:#0f2d54;font-weight:700;margin-bottom:.4rem}
-.stage{font-size:.85rem;color:#64748b;margin-bottom:1.5rem;min-height:1.2em}
-.bar-track{background:#f1f5f9;border-radius:999px;height:10px;overflow:hidden;margin-bottom:.5rem}
+.stage{font-size:.85rem;color:#64748b;margin-bottom:1.25rem;min-height:1.2em}
+.bar-track{background:#f1f5f9;border-radius:999px;height:12px;overflow:hidden;margin-bottom:.5rem}
 .bar-fill{background:linear-gradient(90deg,#1a4a8a,#3b82f6);height:100%;width:0%;
-  border-radius:999px;transition:width .4s ease}
-.bar-label{font-size:.75rem;color:#94a3b8}
+  border-radius:999px;transition:width .5s ease}
+.bar-fill.indeterminate{width:30% !important;animation:slide 1.4s ease-in-out infinite}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(430%)}}
+.stats{display:flex;justify-content:space-between;align-items:center;margin-top:.4rem}
+.pct{font-size:1.4rem;font-weight:700;color:#0f2d54}
+.pct.dim{font-size:.85rem;font-weight:400;color:#94a3b8}
+.eta{font-size:.78rem;color:#64748b;text-align:right}
+.rows{font-size:.72rem;color:#94a3b8;margin-top:.25rem}
+.heartbeat{display:inline-block;width:8px;height:8px;border-radius:50%;
+  background:#22c55e;margin-right:.4rem;animation:pulse 1.5s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.7)}}
+.live{font-size:.72rem;color:#64748b;margin-top:.85rem;display:flex;align-items:center;justify-content:center}
 .err{display:none;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;
   border-radius:10px;padding:1rem;font-size:.8rem;text-align:left;margin-top:1rem;
   white-space:pre-wrap;max-height:240px;overflow:auto}
-.retry{display:none;margin-top:1rem;color:#1d4ed8;font-weight:600;font-size:.85rem;
-  text-decoration:none}
+.retry{display:none;margin-top:1rem;color:#1d4ed8;font-weight:600;font-size:.85rem;text-decoration:none}
 </style>
 </head>
 <body>
 <div class="card">
   <div class="spinner" id="spinner"></div>
-  <h1 id="title">Parsing masterlist…</h1>
-  <p class="stage" id="stage">This usually takes 1–3 minutes for the full file — please keep this tab open.</p>
-  <div class="bar-track"><div class="bar-fill" id="bar"></div></div>
-  <div class="bar-label" id="barLabel">Starting…</div>
+  <h1 id="title">Processing masterlist…</h1>
+  <p class="stage" id="stage">Starting up…</p>
+  <div class="bar-track"><div class="bar-fill indeterminate" id="bar"></div></div>
+  <div class="stats">
+    <span class="pct dim" id="pct">—</span>
+    <span class="eta" id="eta"></span>
+  </div>
+  <div class="rows" id="rows"></div>
+  <div class="live"><span class="heartbeat" id="hb"></span><span id="liveLabel">Connecting…</span></div>
   <pre class="err" id="err"></pre>
   <a class="retry" id="retry" href="/">← Back to upload</a>
 </div>
 <script>
+let _startedAt = null;
+let _lastProgress = 0;
+let _stalled = 0;
+
+function fmt(n){ return n.toLocaleString(); }
+function fmtTime(sec){
+  if(sec < 60) return Math.round(sec) + 's';
+  const m = Math.floor(sec/60), s = Math.round(sec%60);
+  return m + 'm ' + (s<10?'0':'') + s + 's';
+}
+
 async function poll(){
   try{
     const r = await fetch('/upload_status');
     const d = await r.json();
+    const bar = document.getElementById('bar');
+    const pctEl = document.getElementById('pct');
+    const etaEl = document.getElementById('eta');
+    const rowsEl = document.getElementById('rows');
+    const liveLabel = document.getElementById('liveLabel');
+
     if(d.status === 'done'){
+      bar.classList.remove('indeterminate');
+      bar.style.width = '100%';
+      pctEl.className = 'pct';
+      pctEl.textContent = '100%';
+      etaEl.textContent = 'Complete';
       document.getElementById('title').textContent = 'Done — opening dashboard…';
-      document.getElementById('barLabel').textContent = 'Complete';
-      document.getElementById('bar').style.width = '100%';
+      document.getElementById('stage').textContent = '';
+      document.getElementById('hb').style.background = '#3b82f6';
+      liveLabel.textContent = 'Redirecting…';
       window.location.href = '/';
       return;
     }
@@ -60,20 +97,52 @@ async function poll(){
       document.getElementById('err').style.display = 'block';
       document.getElementById('err').textContent = d.error || 'Unknown error';
       document.getElementById('retry').style.display = 'inline-block';
+      document.getElementById('hb').style.background = '#ef4444';
+      liveLabel.textContent = 'Error';
       return;
     }
+
+    // parsing — update stage text
     if(d.stage) document.getElementById('stage').textContent = d.stage;
-    if(d.total){
-      const pct = Math.min(100, Math.round(d.progress / d.total * 100));
-      document.getElementById('bar').style.width = pct + '%';
-      document.getElementById('barLabel').textContent = pct + '% · ' + d.progress.toLocaleString() + ' / ' + d.total.toLocaleString() + ' rows';
+    liveLabel.textContent = 'Live — updating every second';
+
+    if(d.total && d.total > 0){
+      // known progress
+      const pct = Math.min(99, Math.round(d.progress / d.total * 100));
+      bar.classList.remove('indeterminate');
+      bar.style.width = pct + '%';
+      pctEl.className = 'pct';
+      pctEl.textContent = pct + '%';
+      rowsEl.textContent = fmt(d.progress) + ' / ' + fmt(d.total) + ' rows';
+
+      // ETA
+      if(!_startedAt) _startedAt = Date.now();
+      const elapsed = (Date.now() - _startedAt) / 1000;
+      if(pct > 2){
+        const totalSec = elapsed / (pct / 100);
+        const remaining = Math.max(0, totalSec - elapsed);
+        etaEl.textContent = '~' + fmtTime(remaining) + ' remaining';
+      }
+
+      // stall detection
+      if(d.progress === _lastProgress){ _stalled++; } else { _stalled = 0; }
+      _lastProgress = d.progress;
+      if(_stalled > 20){
+        etaEl.textContent = 'Still working…';
+      }
     } else {
-      document.getElementById('barLabel').textContent = 'Reading file…';
+      // indeterminate (downloading from cloud, compressing, etc.)
+      bar.classList.add('indeterminate');
+      pctEl.className = 'pct dim';
+      pctEl.textContent = '—';
+      rowsEl.textContent = '';
+      etaEl.textContent = '';
     }
+
   }catch(e){
-    // transient network hiccup — keep polling
+    document.getElementById('liveLabel').textContent = 'Reconnecting…';
   }
-  setTimeout(poll, 1200);
+  setTimeout(poll, 1000);
 }
 poll();
 </script>
