@@ -523,27 +523,42 @@ def parse_iso(val):
 _intern = sys.intern
 
 
-def build_records(file_storage, date_basis, on_progress=None):
-    """Parse the uploaded xlsx directly into compact, interned tuples sorted by
-    date ordinal — single pass over the sheet (the old version built a full
-    220k-row list of dicts first, then made a second pass over that list;
-    merging the two saves one full materialization of the row data, though
-    `dict.get` per row turned out to be the cheap part — openpyxl's own XML
-    parsing per row dominates the wall-clock time either way). If given,
-    on_progress(i, total) is called periodically with the current/total row
-    count so a caller (e.g. a background upload thread) can report status."""
-    import openpyxl
-    wb = openpyxl.load_workbook(file_storage, read_only=True, data_only=True)
-    ws = wb["Sheet1"] if "Sheet1" in wb.sheetnames else wb.active
+def _iter_sheet_rows(file_storage):
+    """Return (headers, row_iterator, total_rows, close_fn) using calamine if
+    available (Rust-based, ~5× faster, much less memory), else openpyxl."""
     try:
-        total = ws.max_row - 1 if ws.max_row else 0
-    except Exception:
-        total = 0
+        from python_calamine import CalamineWorkbook
+        data = file_storage.read() if hasattr(file_storage, 'read') else file_storage
+        wb = CalamineWorkbook.from_bytes(data)
+        names = wb.sheet_names
+        ws = wb.get_sheet_by_name("Sheet1") if "Sheet1" in names else wb.get_sheet_by_index(0)
+        rows = ws.to_python(skip_empty_area=False)
+        total = max(0, len(rows) - 1)
+        print(f"[parse] using calamine — {total} data rows", flush=True)
+        return iter(rows), total, lambda: None
+    except Exception as e:
+        print(f"[parse] calamine unavailable ({e}), falling back to openpyxl", flush=True)
+        import openpyxl
+        if not hasattr(file_storage, 'read'):
+            file_storage = io.BytesIO(file_storage)
+        wb = openpyxl.load_workbook(file_storage, read_only=True, data_only=True)
+        ws = wb["Sheet1"] if "Sheet1" in wb.sheetnames else wb.active
+        try:
+            total = ws.max_row - 1 if ws.max_row else 0
+        except Exception:
+            total = 0
+        print(f"[parse] using openpyxl — {total} data rows", flush=True)
+        return ws.iter_rows(values_only=True), total, wb.close
+
+
+def build_records(file_storage, date_basis, on_progress=None):
+    """Parse the uploaded xlsx into compact interned tuples sorted by date ordinal."""
+    rows_iter, total, close_fn = _iter_sheet_rows(file_storage)
 
     recs = []
     undated = 0
     headers = None
-    for i, row in enumerate(ws.iter_rows(values_only=True)):
+    for i, row in enumerate(rows_iter):
         if i == 0:
             headers = [str(h).strip() if h is not None else f"col_{j}" for j, h in enumerate(row)]
             continue
@@ -613,7 +628,7 @@ def build_records(file_storage, date_basis, on_progress=None):
                      port, importer, i2, gen, prod, orig, hs4, hs6, hs11,
                      is_oil, is_veh, is_ckd, vtype, pt, units, safe_float(g("QUANTITY")),
                      comps, iso, vclass, hs8, spec))
-    wb.close()
+    close_fn()
     recs.sort(key=lambda r: r[ORD])
     if on_progress:
         on_progress(total, total)
