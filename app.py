@@ -19,6 +19,7 @@ import base64
 import bisect
 import csv
 import gzip
+import tempfile
 import hmac
 import io
 import json
@@ -549,30 +550,40 @@ _intern = sys.intern
 
 
 def _iter_sheet_rows(file_storage):
-    """Return (headers, row_iterator, total_rows, close_fn) using calamine if
-    available (Rust-based, ~5× faster, much less memory), else openpyxl."""
+    """Return (row_iterator, total_rows, close_fn) using calamine if available
+    (Rust-based, mmap from path = minimal RAM), else openpyxl streaming.
+    file_storage may be a file-system path (str), raw bytes, or a file-like object."""
     try:
         from python_calamine import CalamineWorkbook
-        data = file_storage.read() if hasattr(file_storage, 'read') else file_storage
-        wb = CalamineWorkbook.from_bytes(data)
+        if isinstance(file_storage, str):
+            # Best case: path → calamine mmaps the file, no Python copy
+            wb = CalamineWorkbook.from_path(file_storage)
+        elif isinstance(file_storage, bytes):
+            wb = CalamineWorkbook.from_bytes(file_storage)
+        else:
+            wb = CalamineWorkbook.from_bytes(file_storage.read())
         names = wb.sheet_names
         ws = wb.get_sheet_by_name("Sheet1") if "Sheet1" in names else wb.get_sheet_by_index(0)
         rows = ws.to_python(skip_empty_area=False)
         total = max(0, len(rows) - 1)
-        print(f"[parse] using calamine — {total} data rows", flush=True)
+        print(f"[parse] calamine — {total} data rows", flush=True)
         return iter(rows), total, lambda: None
     except Exception as e:
         print(f"[parse] calamine unavailable ({e}), falling back to openpyxl", flush=True)
         import openpyxl
-        if not hasattr(file_storage, 'read'):
-            file_storage = io.BytesIO(file_storage)
-        wb = openpyxl.load_workbook(file_storage, read_only=True, data_only=True)
+        if isinstance(file_storage, str):
+            src = file_storage
+        elif isinstance(file_storage, bytes):
+            src = io.BytesIO(file_storage)
+        else:
+            src = file_storage
+        wb = openpyxl.load_workbook(src, read_only=True, data_only=True)
         ws = wb["Sheet1"] if "Sheet1" in wb.sheetnames else wb.active
         try:
             total = ws.max_row - 1 if ws.max_row else 0
         except Exception:
             total = 0
-        print(f"[parse] using openpyxl — {total} data rows", flush=True)
+        print(f"[parse] openpyxl — {total} data rows", flush=True)
         return ws.iter_rows(values_only=True), total, wb.close
 
 
@@ -1677,13 +1688,15 @@ def replace():
     return redirect("/")
 
 
-def _run_upload_job(f1_bytes, f1_name, f2_bytes, f2_name, targets_bytes, date_basis,
+def _run_upload_job(f1_src, f1_name, f2_bytes, f2_name, targets_bytes, date_basis,
                     _save_to_sb=True):
+    """f1_src may be a file-system path (str from chunked upload) or raw bytes."""
+    _tmp_path = f1_src if isinstance(f1_src, str) else None
     try:
         def progress(i, total):
             _set_job(progress=i, total=total)
 
-        recs, undated = build_records(io.BytesIO(f1_bytes), date_basis, on_progress=progress)
+        recs, undated = build_records(f1_src, date_basis, on_progress=progress)
         if not recs:
             _set_job(status="error", error="No dated rows found in the masterlist.")
             return
@@ -1727,6 +1740,12 @@ def _run_upload_job(f1_bytes, f1_name, f2_bytes, f2_name, targets_bytes, date_ba
             _set_job(stage="")
     except Exception:
         _set_job(status="error", error=traceback.format_exc())
+    finally:
+        if _tmp_path:
+            try:
+                os.unlink(_tmp_path)
+            except Exception:
+                pass
 
 
 @app.route("/upload", methods=["POST"])
@@ -1756,9 +1775,10 @@ def upload():
 
 @app.route("/upload_chunk", methods=["POST"])
 def upload_chunk():
-    """Receive one 2 MB slice of a large file upload.  When all slices arrive
-    the full file is assembled in memory and parsing starts.  This sidesteps
-    Render's 30-second HTTP timeout that kills single large-file POST requests."""
+    """Receive one 2 MB slice of a large file upload.  Chunks are written
+    directly to a temp file on disk and freed from RAM immediately — peak
+    memory is one chunk at a time, not the whole file.  When the final slice
+    arrives, parsing starts from the temp-file path (calamine mmaps it)."""
     token      = request.form.get("token", "")
     idx        = int(request.form.get("idx", 0))
     total      = int(request.form.get("total", 1))
@@ -1771,34 +1791,38 @@ def upload_chunk():
     if not chunk_file:
         return jsonify(ok=False, error="missing chunk"), 400
 
-    chunk_bytes = chunk_file.read()
-
     with _CHUNKS_LOCK:
         if token not in _CHUNKS:
-            _CHUNKS[token] = {"parts": {}, "total": total,
-                              "name": name, "date_basis": date_basis}
-        _CHUNKS[token]["parts"][idx] = chunk_bytes
-        have = len(_CHUNKS[token]["parts"])
+            fh = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+            _CHUNKS[token] = {"path": fh.name, "fh": fh, "received": 0,
+                              "total": total, "name": name, "date_basis": date_basis}
+        info = _CHUNKS[token]
+        if idx != info["received"]:
+            return jsonify(ok=False, error=f"out-of-order chunk {idx}"), 400
+        # Write and immediately discard from RAM
+        info["fh"].write(chunk_file.read())
+        info["received"] += 1
+        have = info["received"]
         done = have == total
         if done:
+            info["fh"].flush()
+            info["fh"].close()
             info = _CHUNKS.pop(token)
 
     if not done:
         return jsonify(ok=True, received=have, total=total, done=False)
 
-    # All chunks received — assemble and kick off background parse
-    f1_bytes = b"".join(info["parts"][i] for i in range(info["total"]))
-
+    # Optional files arrive with the last chunk (they're small)
     f2 = request.files.get("file2")
     f2_bytes = f2.read() if (f2 and f2.filename) else None
     f2_name  = f2.filename if f2_bytes else None
-
     tgt = request.files.get("targets")
     targets_bytes = tgt.read() if (tgt and tgt.filename) else None
 
+    tmp_path = info["path"]
     _set_job(status="parsing", progress=0, total=0, stage="Parsing masterlist…", error=None)
     threading.Thread(target=_run_upload_job,
-                     args=(f1_bytes, info["name"], f2_bytes, f2_name,
+                     args=(tmp_path, info["name"], f2_bytes, f2_name,
                            targets_bytes, info["date_basis"]),
                      daemon=True).start()
     return jsonify(ok=True, received=have, total=total, done=True)
