@@ -49,6 +49,10 @@ async function poll(){
       window.location.href = '/';
       return;
     }
+    if(d.status === 'idle'){
+      window.location.href = '/';
+      return;
+    }
     if(d.status === 'error'){
       document.getElementById('spinner').style.display = 'none';
       document.getElementById('title').textContent = 'Something went wrong';

@@ -118,6 +118,18 @@ def _sb_download(key, on_progress=None):
         return None
 
 
+def _sb_head(key):
+    """Return True if the object exists in Supabase Storage (HEAD request)."""
+    url = f"{_SB_URL}/storage/v1/object/{_SB_BUCKET}/{key}"
+    req = urllib.request.Request(url, method="HEAD")
+    req.add_header("Authorization", f"Bearer {_SB_KEY}")
+    try:
+        with urllib.request.urlopen(req, timeout=10):
+            return True
+    except Exception:
+        return False
+
+
 def _sb_put_meta(d):
     _sb_upload(_SB_META, json.dumps(d).encode(), "application/json")
 
@@ -293,7 +305,15 @@ def _try_autoload():
         return False
     if not meta:
         return False
-    print("[supabase] stored masterlist found — auto-reloading", flush=True)
+    # Verify the snapshot file actually exists before spawning the thread.
+    # Stale meta (from a failed upload) would otherwise cause an infinite
+    # autoload→idle→autoload loop.
+    if not _sb_head(_SB_SNAP):
+        print("[supabase] meta found but snapshot missing — need fresh upload", flush=True)
+        with _SB_AUTOLOAD_LOCK:
+            _SB_AUTOLOAD_DONE = False
+        return False
+    print("[supabase] snapshot found — auto-reloading", flush=True)
     _set_job(status="parsing", progress=0, total=0,
              stage="Auto-reloading from cloud storage…", error=None)
     threading.Thread(target=_do_load_from_supabase, args=(meta,), daemon=True).start()
