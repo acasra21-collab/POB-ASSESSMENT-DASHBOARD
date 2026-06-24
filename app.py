@@ -74,6 +74,7 @@ def _sb_ok():
 
 
 def _sb_upload(key, data, ctype="application/octet-stream"):
+    """Upload to Supabase Storage. Returns True on success, False on failure."""
     url = f"{_SB_URL}/storage/v1/object/{_SB_BUCKET}/{key}"
     req = urllib.request.Request(url, data=data, method="POST")
     req.add_header("Authorization", f"Bearer {_SB_KEY}")
@@ -83,8 +84,10 @@ def _sb_upload(key, data, ctype="application/octet-stream"):
         with urllib.request.urlopen(req, timeout=180):
             pass
         print(f"[supabase] saved {key} ({len(data)/1e6:.1f} MB)", flush=True)
+        return True
     except Exception as e:
         print(f"[supabase] upload {key} failed: {e}", flush=True)
+        return False
 
 
 def _sb_download(key, on_progress=None):
@@ -144,6 +147,10 @@ def _do_load_from_supabase(meta):
         f1_bytes = _sb_download(_SB_F1, on_progress=dl_progress)
         if not f1_bytes:
             _set_job(status="idle", stage="", progress=0, total=0)
+            # Reset flag so the next page visit can retry
+            global _SB_AUTOLOAD_DONE
+            with _SB_AUTOLOAD_LOCK:
+                _SB_AUTOLOAD_DONE = False
             return
 
         f2_bytes = None
@@ -1557,20 +1564,26 @@ def _run_upload_job(f1_bytes, f1_name, f2_bytes, f2_name, targets_bytes, date_ba
                        "undated": undated, "prior": prior, "prior_name": f2_name}
         _set_job(status="done", progress=len(recs), total=len(recs), stage="")
 
-        # Persist to Supabase Storage so the next cold start can auto-reload
+        # Persist to Supabase Storage so the next cold start can auto-reload.
+        # Only save the meta pointer AFTER the file upload succeeds — if the
+        # file upload fails (e.g. exceeds bucket size limit) we leave meta
+        # untouched so stale pointers don't cause silent reload failures.
         if _save_to_sb and _sb_ok():
             _set_job(stage="Saving to cloud storage…")
-            _sb_upload(_SB_F1, f1_bytes,
-                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            if f2_bytes:
-                _sb_upload(_SB_F2, f2_bytes,
-                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            if targets_bytes:
-                _sb_upload(_SB_TGT, targets_bytes, "text/csv")
-            _sb_put_meta({"file1": f1_name, "file2": f2_name,
-                          "date_basis": date_basis,
-                          "has_prior": bool(f2_bytes),
-                          "has_targets": bool(targets_bytes)})
+            ok = _sb_upload(_SB_F1, f1_bytes,
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            if ok:
+                if f2_bytes:
+                    _sb_upload(_SB_F2, f2_bytes,
+                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                if targets_bytes:
+                    _sb_upload(_SB_TGT, targets_bytes, "text/csv")
+                _sb_put_meta({"file1": f1_name, "file2": f2_name,
+                              "date_basis": date_basis,
+                              "has_prior": bool(f2_bytes),
+                              "has_targets": bool(targets_bytes)})
+            else:
+                print("[supabase] masterlist upload failed — meta not updated", flush=True)
             _set_job(stage="")
     except Exception:
         _set_job(status="error", error=traceback.format_exc())
