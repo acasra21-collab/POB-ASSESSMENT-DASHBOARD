@@ -1606,6 +1606,20 @@ def upload_status():
     return jsonify(**_get_job())
 
 
+@app.route("/debug_sb")
+def debug_sb():
+    meta = _sb_get_meta() if _sb_ok() else None
+    return jsonify(
+        sb_enabled=_sb_ok(),
+        sb_url=bool(_SB_URL),
+        sb_key=bool(_SB_KEY),
+        autoload_done=_SB_AUTOLOAD_DONE,
+        has_data=STATE["ds"] is not None,
+        meta=meta,
+        job=_get_job(),
+    )
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8060))
     debug = os.environ.get("FLASK_DEBUG", "1") == "1"
