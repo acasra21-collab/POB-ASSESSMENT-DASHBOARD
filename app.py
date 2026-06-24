@@ -479,6 +479,11 @@ STATE = {"ds": None,
          "job": {"status": "idle", "progress": 0, "total": 0, "stage": "", "error": None}}
 JOB_LOCK = threading.Lock()
 
+# Chunked-upload assembly buffer. Browser splits large files into 2 MB pieces
+# so each request finishes well within Render's 30-second HTTP timeout.
+_CHUNKS: dict = {}   # token → {"parts": {idx: bytes}, "total": int, ...}
+_CHUNKS_LOCK = threading.Lock()
+
 
 def _set_job(**kw):
     with JOB_LOCK:
@@ -1747,6 +1752,56 @@ def upload():
                       args=(f1_bytes, f1_name, f2_bytes, f2_name, targets_bytes, date_basis),
                       daemon=True).start()
     return render_template("uploading.html")
+
+
+@app.route("/upload_chunk", methods=["POST"])
+def upload_chunk():
+    """Receive one 2 MB slice of a large file upload.  When all slices arrive
+    the full file is assembled in memory and parsing starts.  This sidesteps
+    Render's 30-second HTTP timeout that kills single large-file POST requests."""
+    token      = request.form.get("token", "")
+    idx        = int(request.form.get("idx", 0))
+    total      = int(request.form.get("total", 1))
+    name       = request.form.get("name", "masterlist.xlsx")
+    date_basis = request.form.get("date_basis", "COLLECTIONDATE")
+    if date_basis not in DATE_BASES:
+        date_basis = "COLLECTIONDATE"
+
+    chunk_file = request.files.get("chunk")
+    if not chunk_file:
+        return jsonify(ok=False, error="missing chunk"), 400
+
+    chunk_bytes = chunk_file.read()
+
+    with _CHUNKS_LOCK:
+        if token not in _CHUNKS:
+            _CHUNKS[token] = {"parts": {}, "total": total,
+                              "name": name, "date_basis": date_basis}
+        _CHUNKS[token]["parts"][idx] = chunk_bytes
+        have = len(_CHUNKS[token]["parts"])
+        done = have == total
+        if done:
+            info = _CHUNKS.pop(token)
+
+    if not done:
+        return jsonify(ok=True, received=have, total=total, done=False)
+
+    # All chunks received — assemble and kick off background parse
+    f1_bytes = b"".join(info["parts"][i] for i in range(info["total"]))
+
+    f2 = request.files.get("file2")
+    f2_bytes = f2.read() if (f2 and f2.filename) else None
+    f2_name  = f2.filename if f2_bytes else None
+
+    tgt = request.files.get("targets")
+    targets_bytes = tgt.read() if (tgt and tgt.filename) else None
+
+    _set_job(status="parsing", progress=0, total=0, stage="Parsing masterlist…", error=None)
+    threading.Thread(target=_run_upload_job,
+                     args=(f1_bytes, info["name"], f2_bytes, f2_name,
+                           targets_bytes, info["date_basis"]),
+                     daemon=True).start()
+    return jsonify(ok=True, received=have, total=total, done=True)
 
 
 @app.route("/upload_status")

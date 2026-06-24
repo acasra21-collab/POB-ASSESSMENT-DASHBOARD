@@ -83,7 +83,7 @@ footer{color:rgba(255,255,255,.5);font-size:.72rem;margin-top:1.5rem;text-align:
     <h2>Generate Interactive Collection Dashboard</h2>
     <p class="sub">Upload the raw BOC masterlist (.xlsx) and instantly generate a self-contained interactive HTML dashboard — daily collection vs DBCC target, oil/non-oil split, top importers &amp; commodities, car imports with powertrain mix, petroleum drill-downs, and the auto A–F memo. No server required to view.</p>
 
-    <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
+    <form id="uploadForm" enctype="multipart/form-data">
       <div class="file-section">
         <div class="file-label">Masterlist (current) <span class="badge-req">REQUIRED</span></div>
         <div class="drop-zone" id="drop1">
@@ -159,10 +159,56 @@ document.querySelectorAll('.drop-zone').forEach(zone=>{
   zone.addEventListener('dragleave',()=>zone.classList.remove('drag-over'));
   zone.addEventListener('drop',()=>zone.classList.remove('drag-over'));
 });
-document.getElementById('uploadForm').addEventListener('submit',function(){
-  document.getElementById('submitBtn').disabled=true;
-  document.getElementById('spinner').style.display='block';
-  document.getElementById('btnText').textContent='Parsing masterlist — this can take 1–2 minutes…';
+
+document.getElementById('uploadForm').addEventListener('submit', async function(e){
+  e.preventDefault();
+  const file1 = document.getElementById('file1').files[0];
+  if(!file1){ alert('Please select a masterlist file.'); return; }
+
+  const btn = document.getElementById('submitBtn');
+  const spinner = document.getElementById('spinner');
+  const btnText = document.getElementById('btnText');
+  btn.disabled = true;
+  spinner.style.display = 'block';
+
+  const CHUNK = 2 * 1024 * 1024; // 2 MB per chunk
+  const totalChunks = Math.ceil(file1.size / CHUNK);
+  const token = Math.random().toString(36).slice(2) + Date.now();
+  const dateBasis = document.getElementById('date_basis').value;
+  const file2 = document.getElementById('file2').files[0] || null;
+  const targets = document.getElementById('targets').files[0] || null;
+
+  for(let i = 0; i < totalChunks; i++){
+    const start = i * CHUNK;
+    const chunk = file1.slice(start, start + CHUNK);
+    const fd = new FormData();
+    fd.append('token', token);
+    fd.append('idx', i);
+    fd.append('total', totalChunks);
+    fd.append('name', file1.name);
+    fd.append('date_basis', dateBasis);
+    fd.append('chunk', chunk, file1.name);
+    // attach optional files with the last chunk
+    if(i === totalChunks - 1){
+      if(file2) fd.append('file2', file2, file2.name);
+      if(targets) fd.append('targets', targets, targets.name);
+    }
+
+    const pct = Math.round((i + 1) / totalChunks * 100);
+    btnText.textContent = `Uploading ${pct}% (${i+1} / ${totalChunks} parts)…`;
+
+    try{
+      const resp = await fetch('/upload_chunk', {method:'POST', body:fd});
+      if(!resp.ok){ throw new Error('HTTP ' + resp.status); }
+      const data = await resp.json();
+      if(data.done){ window.location.href = '/'; return; }
+    } catch(err){
+      btnText.textContent = 'Upload failed — ' + err.message + '. Try again.';
+      spinner.style.display = 'none';
+      btn.disabled = false;
+      return;
+    }
+  }
 });
 </script>
 </body>
